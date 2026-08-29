@@ -5,6 +5,24 @@ import { DockNotchSurface } from './DockNotchSurface';
 import { formatPlanProgressGlint } from './planPresentation';
 import { parseConfirmationPlan } from './useAgentConfirmations';
 
+describe('DockNotchSurface realtime route', () => {
+  it('names the OpenAI realtime route instead of claiming only that voice is live', () => {
+    const markup = renderToStaticMarkup(createElement(DockNotchSurface, {
+      snapshot: {
+        state: 'idle',
+        audioLevel: 0,
+        durationMs: 0,
+        error: null,
+        partialTranscript: '',
+      },
+      realtimeVoice: 'live',
+    }));
+
+    expect(markup).toContain('Realtime · OpenAI');
+    expect(markup).not.toContain('Voice live');
+  });
+});
+
 describe('DockNotchSurface confirmation review', () => {
   it('keeps a long review scrollable above fixed decision controls', () => {
     const summary = 'Review evidence. '.repeat(100);

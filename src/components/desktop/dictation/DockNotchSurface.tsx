@@ -510,9 +510,9 @@ interface DockNotchSurfaceProps {
   speechSpeed?: number;
   onSpeechSpeed?: (rate: number) => void;
   /** Realtime voice-to-voice presence (Track B). `live` shows the brand
-   * waveform + a "Voice live" tag in the dock; `connecting` shows a spinner.
-   * `off` is invisible. This is the SAME Symon, just in voice mode — it belongs
-   * up here in the dock, not only in the IDE window. */
+   * waveform + a truthful "Realtime · OpenAI" route tag in the dock;
+   * `connecting` shows a spinner. This is the SAME Symon, just in voice mode —
+   * it belongs up here in the dock, not only in the IDE window. */
   realtimeVoice?: 'off' | 'connecting' | 'live';
   /** Tap the voice-live capsule to end the session (mirrors the in-window pill
    * + the double-tap right ⌘ toggle). */
@@ -767,8 +767,8 @@ export function DockNotchSurface({
     }
     if (isRealtimeVoice) {
       // Voice-to-voice — the brand capsule (same footprint as listening), the
-      // live EQ on the left + a "Voice live" tag. Slightly wider than 248 so the
-      // tag never crowds the waveform; wider still when it also has to carry the
+      // live EQ on the left + a truthful route tag. Slightly wider than 248 so
+      // the tag never crowds the waveform; wider still when it also carries the
       // in-flight worker count (the conductor delegated work — show it happening).
       const withWorkers = realtimeVoice === 'live' && workerWorking > 0;
       return {
@@ -1066,8 +1066,8 @@ export function DockNotchSurface({
     body = (
       <div
         role="button"
-        aria-label={connecting ? 'Connecting voice' : 'Voice live — tap to stop'}
-        title={connecting ? 'Connecting…' : 'Voice-to-voice is live — tap to stop'}
+        aria-label={connecting ? 'Connecting realtime voice' : 'Realtime via OpenAI — tap to stop'}
+        title={connecting ? 'Connecting…' : 'Realtime voice via OpenAI is live — tap to stop'}
         onClick={(e) => { e.stopPropagation(); if (!connecting) onStopRealtime?.(); }}
         style={{
           display: 'flex',
@@ -1114,7 +1114,7 @@ export function DockNotchSurface({
               whiteSpace: 'nowrap',
             }}
           >
-            {connecting ? 'Connecting…' : 'Voice live'}
+            {connecting ? 'Connecting…' : 'Realtime · OpenAI'}
           </span>
         </span>
         {/* The conductor delegated work — surface it happening, right in the
