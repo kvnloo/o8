@@ -75,6 +75,7 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, description:
 }
 
 async function startWsServer() {
+  serverOutput = '';
   wsProcess = execFile(process.execPath, [
     '--import=./scripts/register-server-only-stub.mjs',
     '--import=tsx',
@@ -93,13 +94,20 @@ async function startWsServer() {
   });
   wsProcess.stdout?.on('data', (chunk) => { serverOutput += String(chunk); });
   wsProcess.stderr?.on('data', (chunk) => { serverOutput += String(chunk); });
+  wsProcess.on('error', (error) => { serverOutput += `\n[ws-server spawn error] ${error.stack ?? error.message}`; });
+  wsProcess.on('exit', (code, signal) => {
+    serverOutput += `\n[ws-server exit] code=${code} signal=${signal} pid=${wsProcess?.pid ?? 'none'}`;
+  });
   await waitFor(async () => {
+    if (wsProcess?.exitCode != null) {
+      throw new Error(`ws-server exited before health. ${serverOutput.slice(-4_000)}`);
+    }
     try {
       return (await fetch(`http://127.0.0.1:${wsPort}/health`)).ok;
     } catch {
       return false;
     }
-  }, 'ws-server health', 30_000);
+  }, 'ws-server health', 90_000);
 }
 
 async function stopWsServer() {
@@ -241,7 +249,7 @@ beforeAll(async () => {
   apiServer.listen(apiPort, '127.0.0.1');
   await once(apiServer, 'listening');
   await startWsServer();
-}, 40_000);
+}, 120_000);
 
 afterAll(async () => {
   for (const socket of sockets) socket.close();
