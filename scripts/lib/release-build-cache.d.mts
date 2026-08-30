@@ -56,11 +56,24 @@ export function captureReleaseBuildCache(
   },
 ): Promise<ReleaseBuildCacheAction>;
 export function createReleaseBuildCacheRunId(): string;
+export interface ReleaseBuildCacheWriteOptions {
+  env?: NodeJS.ProcessEnv;
+  projectRoot?: string;
+  warn?: (line: string) => void;
+}
+
 export function writeReleaseBuildCachePhaseReceipt(
   cacheRoot: string,
   runId: string,
   receipt: { phase: ReleaseBuildCachePhase; restore?: ReleaseBuildCacheAction; buildDurationMs?: number; capture?: ReleaseBuildCacheAction },
+  options?: ReleaseBuildCacheWriteOptions,
 ): void;
+export function writeReleaseBuildCachePrebuildMarker(
+  cacheRoot: string,
+  runId: string,
+  completedAt: number,
+  options?: ReleaseBuildCacheWriteOptions,
+): string;
 export function finalizeReleaseBuildCacheReceipt(
   cacheRoot: string,
   runId: string,
@@ -69,7 +82,7 @@ export function finalizeReleaseBuildCacheReceipt(
     source: Record<string, unknown>;
     buildDurationMs: number;
   },
-  options?: { projectRoot?: string },
+  options?: ReleaseBuildCacheWriteOptions,
 ): { receipt: Record<string, unknown>; receiptPath: string };
 export const releaseBuildCacheInternals: {
   PHASE_CONFIG: Record<ReleaseBuildCachePhase, unknown>;

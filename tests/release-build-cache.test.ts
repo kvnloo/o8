@@ -20,6 +20,7 @@ import {
   resolveReleaseBuildCacheRoot,
   restoreReleaseBuildCache,
   writeReleaseBuildCachePhaseReceipt,
+  writeReleaseBuildCachePrebuildMarker,
   type ReleaseBuildCacheIdentity,
 } from '../scripts/lib/release-build-cache.mjs';
 
@@ -89,6 +90,42 @@ describe('shared release build cache', () => {
       .toMatchObject({ status: 'captured' });
     expect(existsSync(join(cacheRoot, 'entries', 'web', 'compatibility-a', 'entry-b.tar'))).toBe(false);
     expect(existsSync(join(localRoot, 'entries', 'web', 'compatibility-a', 'entry-b.tar'))).toBe(true);
+  });
+
+  it('revalidates a stale external root before receipt and prebuild marker writes', () => {
+    const { root } = fixture();
+    const volumeRoot = mkdtempSync(join(tmpdir(), 'o8-release-cache-volume-'));
+    const cacheRoot = join(volumeRoot, 'cache');
+    const localRoot = join(root, 'local-fallback');
+    const env = {
+      NODE_ENV: 'test' as const,
+      O8_RELEASE_BUILD_CACHE_DIR: cacheRoot,
+      O8_RELEASE_BUILD_CACHE_EXTERNAL_ROOT: volumeRoot,
+      O8_RELEASE_BUILD_CACHE_VOLUME_ID: 'archive-a',
+      O8_RELEASE_BUILD_CACHE_LOCAL_DIR: localRoot,
+    };
+    writeFileSync(join(volumeRoot, '.o8-release-cache-volume'), 'archive-a\n');
+    expect(resolveReleaseBuildCacheRoot(env)).toBe(cacheRoot);
+
+    rmSync(volumeRoot, { recursive: true, force: true });
+    writeReleaseBuildCachePhaseReceipt(cacheRoot, 'run-stale', {
+      phase: 'web',
+      restore: { phase: 'web', status: 'miss', reason: 'entry_missing', durationMs: 0 },
+    }, { env, warn: () => {} });
+    const finalized = finalizeReleaseBuildCacheReceipt(cacheRoot, 'run-stale', {
+      outcome: 'PASS',
+      source: { head: 'head-a' },
+      buildDurationMs: 1,
+    }, { env, projectRoot: root, warn: () => {} });
+    const markerPath = writeReleaseBuildCachePrebuildMarker(cacheRoot, 'run-stale', 123, {
+      env,
+      warn: () => {},
+    });
+
+    expect(existsSync(volumeRoot)).toBe(false);
+    expect(finalized.receiptPath).toBe(join(localRoot, 'receipts', 'run-stale.json'));
+    expect(markerPath).toBe(join(localRoot, 'runs', 'run-stale', 'prebuild-completed-at'));
+    expect(readFileSync(markerPath, 'utf8')).toBe('123\n');
   });
 
   it('rejects a symlinked external-volume marker', () => {

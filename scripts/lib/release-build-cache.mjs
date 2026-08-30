@@ -236,8 +236,10 @@ function cacheBudgetBytes(env, cacheRoot) {
 
 function operationCacheRoot(options) {
   const env = options.env ?? process.env;
-  if (env.O8_RELEASE_BUILD_CACHE_DIR?.trim()) return resolveReleaseBuildCacheRoot(env);
-  return options.cacheRoot ?? resolveReleaseBuildCacheRoot(env);
+  if (env.O8_RELEASE_BUILD_CACHE_DIR?.trim()) {
+    return resolveReleaseBuildCacheRoot(env, { warn: options.warn });
+  }
+  return options.cacheRoot ?? resolveReleaseBuildCacheRoot(env, { warn: options.warn });
 }
 
 export function collectReleaseBuildCacheIdentity(root, phase, options = {}) {
@@ -704,15 +706,26 @@ function runDirectory(cacheRoot, runId) {
   return join(cacheRoot, 'runs', runId);
 }
 
-export function writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, receipt) {
-  const directory = runDirectory(cacheRoot, runId);
+export function writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, receipt, options = {}) {
+  const currentCacheRoot = operationCacheRoot({ ...options, cacheRoot });
+  const directory = runDirectory(currentCacheRoot, runId);
   ensurePrivateDirectory(directory);
   writeFileSync(join(directory, `${receipt.phase}.json`), `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
 }
 
+export function writeReleaseBuildCachePrebuildMarker(cacheRoot, runId, completedAt, options = {}) {
+  const currentCacheRoot = operationCacheRoot({ ...options, cacheRoot });
+  const directory = runDirectory(currentCacheRoot, runId);
+  ensurePrivateDirectory(directory);
+  const markerPath = join(directory, 'prebuild-completed-at');
+  writeFileSync(markerPath, `${completedAt}\n`, { mode: 0o600 });
+  return markerPath;
+}
+
 export function finalizeReleaseBuildCacheReceipt(cacheRoot, runId, summary, options = {}) {
   const projectRoot = options.projectRoot ?? process.cwd();
-  const directory = runDirectory(cacheRoot, runId);
+  const currentCacheRoot = operationCacheRoot({ ...options, cacheRoot });
+  const directory = runDirectory(currentCacheRoot, runId);
   const phases = {};
   if (existsSync(directory)) {
     for (const name of readdirSync(directory).filter((entry) => entry.endsWith('.json')).sort()) {
@@ -738,7 +751,7 @@ export function finalizeReleaseBuildCacheReceipt(cacheRoot, runId, summary, opti
       misses: restores.filter((restore) => restore.status === 'miss').length,
     },
   };
-  const receiptsDirectory = join(cacheRoot, 'receipts');
+  const receiptsDirectory = join(currentCacheRoot, 'receipts');
   ensurePrivateDirectory(receiptsDirectory);
   const receiptPath = join(receiptsDirectory, `${runId}.json`);
   writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });

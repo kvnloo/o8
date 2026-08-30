@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -17,6 +17,7 @@ import {
   resolveReleaseBuildCacheRoot,
   restoreReleaseBuildCache,
   writeReleaseBuildCachePhaseReceipt,
+  writeReleaseBuildCachePrebuildMarker,
 } from './lib/release-build-cache.mjs';
 import { resolveReleaseConfig } from './lib/release-config.mjs';
 
@@ -101,7 +102,7 @@ async function cachedPhase(cachePhase, label, command, args) {
     restore,
     buildDurationMs,
     capture,
-  });
+  }, { env });
 }
 
 try {
@@ -115,7 +116,7 @@ try {
       writeReleaseBuildCachePhaseReceipt(cacheRoot, cacheRunId, {
         phase: cachePhase,
         restore: { phase: cachePhase, status: 'bypass', reason: 'exact_artifact_reused', durationMs: 0 },
-      });
+      }, { env });
     }
     process.exitCode = 0;
   } else {
@@ -128,7 +129,7 @@ try {
   }
   cacheOutcome = 'PASS';
   if (env.O8_RELEASE_CACHE_PREBUILD_MARKER) {
-    writeFileSync(env.O8_RELEASE_CACHE_PREBUILD_MARKER, `${Date.now()}\n`, { mode: 0o600 });
+    writeReleaseBuildCachePrebuildMarker(cacheRoot, cacheRunId, Date.now(), { env });
   }
 } finally {
   if (ownedDataDir) rmSync(ownedDataDir, { recursive: true, force: true });
@@ -138,7 +139,7 @@ try {
         outcome: cacheOutcome,
         source: cacheSource,
         buildDurationMs: Date.now() - prebuildStartedAt,
-      }, { projectRoot: root });
+      }, { env, projectRoot: root });
       console.log(`[release-cache] receipt ${finalized.receiptPath}`);
     } catch (error) {
       if (isReleaseBuildCacheSafetyError(error)) throw error;

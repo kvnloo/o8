@@ -44,7 +44,10 @@ console.log(
   `[release-cache] native restore=${nativeRestore.status} reason=${nativeRestore.reason}`
   + ` bytes=${nativeRestore.archiveBytes ?? 0} duration=${nativeRestore.durationMs}ms`,
 );
-writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, { phase: 'native', restore: nativeRestore });
+writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, {
+  phase: 'native',
+  restore: nativeRestore,
+}, { env: process.env });
 
 const env = {
   ...process.env,
@@ -58,8 +61,10 @@ const build = spawnSync('cargo', ['tauri', 'build', ...cargoTauriArgs], {
   stdio: 'inherit',
 });
 const buildDurationMs = Date.now() - startedAt;
-const prebuildCompletedAt = existsSync(prebuildMarker)
-  ? Number.parseInt(readFileSync(prebuildMarker, 'utf8').trim(), 10)
+const currentCacheRoot = resolveReleaseBuildCacheRoot(env);
+const currentPrebuildMarker = join(currentCacheRoot, 'runs', runId, 'prebuild-completed-at');
+const prebuildCompletedAt = existsSync(currentPrebuildMarker)
+  ? Number.parseInt(readFileSync(currentPrebuildMarker, 'utf8').trim(), 10)
   : Number.NaN;
 const nativeBuildDurationMs = Number.isFinite(prebuildCompletedAt)
   ? Math.max(0, Date.now() - prebuildCompletedAt)
@@ -92,7 +97,7 @@ if (!build.error && build.status === 0) {
     restore: nativeRestore,
     buildDurationMs: nativeBuildDurationMs,
     capture: nativeCapture,
-  });
+  }, { env });
 }
 
 let finalized;
@@ -101,7 +106,7 @@ try {
     outcome: !build.error && build.status === 0 ? 'PASS' : 'FAIL',
     source: nativeIdentity?.source ?? { head: 'unavailable' },
     buildDurationMs,
-  }, { projectRoot: root });
+  }, { env, projectRoot: root });
   const totals = finalized.receipt.totals ?? {};
   console.log(
     `[release-cache] receipt ${finalized.receiptPath}`
