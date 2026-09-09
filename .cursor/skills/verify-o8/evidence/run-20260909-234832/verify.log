@@ -1,0 +1,25 @@
+[2026-09-09T23:48:32Z] Starting o8 verification suite
+[2026-09-09T23:48:32Z] Evidence directory: .cursor/skills/verify-o8/evidence/run-20260909-234832
+[2026-09-09T23:48:32Z] CHECK: cli-version — CLI version command
+[2026-09-09T23:48:32Z] ✗ FAIL: cli-version (exit 127, 1ms)
+[2026-09-09T23:48:32Z] CHECK: cli-doctor — CLI doctor health check
+[2026-09-09T23:48:32Z] ✗ FAIL: cli-doctor (exit 127, 1ms)
+[2026-09-09T23:48:32Z] CHECK: server-status — Server status endpoint
+[2026-09-09T23:48:32Z] ✗ FAIL: server-status (exit 7, 22ms)
+[2026-09-09T23:48:32Z] CHECK: runtime-detection — Runtime adapter detection
+[2026-09-09T23:48:32Z] ✗ FAIL: runtime-detection (exit 4, 9ms)
+[2026-09-09T23:48:32Z] CHECK: typescript-check — TypeScript type safety
+[2026-09-09T23:48:33Z] ✗ FAIL: typescript-check (exit 1, 782ms)
+[2026-09-09T23:48:33Z] SKIP: unit-tests — node_modules not installed
+[2026-09-09T23:48:33Z] CHECK: cli-status — Fleet status snapshot
+[2026-09-09T23:48:33Z] ✗ FAIL: cli-status (exit 127, 2ms)
+[2026-09-09T23:48:33Z] CHECK: repo-list — Repository list
+[2026-09-09T23:48:33Z] ✗ FAIL: repo-list (exit 127, 2ms)
+[2026-09-09T23:48:33Z] CHECK: project-list — Project list
+[2026-09-09T23:48:33Z] ✗ FAIL: project-list (exit 127, 1ms)
+[2026-09-09T23:48:33Z] CHECK: brain-ask — Engineering Brain Q&A
+[2026-09-09T23:48:33Z] ✗ FAIL: brain-ask (exit 127, 1ms)
+[2026-09-09T23:48:33Z] SKIP: packet commands — not in packet worktree
+[2026-09-09T23:48:33Z] Verification suite completed
+[2026-09-09T23:48:33Z] Results: 0 passed, 9 failed, 4 inconclusive
+[2026-09-09T23:48:33Z] Report: .cursor/skills/verify-o8/evidence/run-20260909-234832/report.json

@@ -1,0 +1,1 @@
+.cursor/skills/verify-o8/verify-all.sh: line 31: o8: command not found
