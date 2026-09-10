@@ -90,6 +90,7 @@ import {
   runTaskReport,
 } from './commands/task.js';
 import { runUpdate } from './commands/update.js';
+import { runVerifySuite } from './commands/verify.js';
 import { printError, type OutputMode } from './output.js';
 import { CliError, EXIT } from './api.js';
 
@@ -217,6 +218,7 @@ commands:
   contract ...         propose and accept generator/evaluator contracts
   sprint ...           start or tick a one-feature-at-a-time sprint
   verify <feature-id>  record computational evidence and optionally tick a sprint
+  verify-suite         run the full o8 verification suite (--report /tmp/results.json)
   harness ...          model-keyed lift, lifecycle, and HarnessBundle operations
   capabilities         discover harness artifacts and recommended call order
   evaluate-diff        independent skeptic review of a supplied or git diff
@@ -453,6 +455,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runSpec(args.mode, secondary, args.rest);
     case 'team':
       return runTeam(args.mode, secondary, args.rest);
+    case 'verify-suite':
+      return runVerifySuite(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     default:
       throw new CliError(
         'unknown_command',

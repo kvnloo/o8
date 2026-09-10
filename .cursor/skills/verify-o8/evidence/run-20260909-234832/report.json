@@ -1,0 +1,96 @@
+{
+  "schema": "o8/verify/suite/v1",
+  "started": "2026-09-09T23:48:32Z",
+  "evidenceDir": ".cursor/skills/verify-o8/evidence/run-20260909-234832",
+  "checks": [
+{
+  "check": "cli-version",
+  "description": "CLI version command",
+  "status": "failed",
+  "exitCode": 127,
+  "duration_ms": 1,
+  "evidence": ".cursor/skills/verify-o8/evidence/run-20260909-234832/cli-version.txt",
+  "timestamp": "2026-09-09T23:48:32Z"
+}
+{
+  "check": "cli-doctor",
+  "description": "CLI doctor health check",
+  "status": "failed",
+  "exitCode": 127,
+  "duration_ms": 1,
+  "evidence": ".cursor/skills/verify-o8/evidence/run-20260909-234832/cli-doctor.txt",
+  "timestamp": "2026-09-09T23:48:32Z"
+}
+{
+  "check": "server-status",
+  "description": "Server status endpoint",
+  "status": "failed",
+  "exitCode": 7,
+  "duration_ms": 22,
+  "evidence": ".cursor/skills/verify-o8/evidence/run-20260909-234832/server-status.txt",
+  "timestamp": "2026-09-09T23:48:32Z"
+}
+{
+  "check": "runtime-detection",
+  "description": "Runtime adapter detection",
+  "status": "failed",
+  "exitCode": 4,
+  "duration_ms": 9,
+  "evidence": ".cursor/skills/verify-o8/evidence/run-20260909-234832/runtime-detection.txt",
+  "timestamp": "2026-09-09T23:48:32Z"
+}
+{
+  "check": "typescript-check",
+  "description": "TypeScript type safety",
+  "status": "failed",
+  "exitCode": 1,
+  "duration_ms": 782,
+  "evidence": ".cursor/skills/verify-o8/evidence/run-20260909-234832/typescript-check.txt",
+  "timestamp": "2026-09-09T23:48:33Z"
+}
+{
+  "check": "cli-status",
+  "description": "Fleet status snapshot",
+  "status": "failed",
+  "exitCode": 127,
+  "duration_ms": 2,
+  "evidence": ".cursor/skills/verify-o8/evidence/run-20260909-234832/cli-status.txt",
+  "timestamp": "2026-09-09T23:48:33Z"
+}
+{
+  "check": "repo-list",
+  "description": "Repository list",
+  "status": "failed",
+  "exitCode": 127,
+  "duration_ms": 2,
+  "evidence": ".cursor/skills/verify-o8/evidence/run-20260909-234832/repo-list.txt",
+  "timestamp": "2026-09-09T23:48:33Z"
+}
+{
+  "check": "project-list",
+  "description": "Project list",
+  "status": "failed",
+  "exitCode": 127,
+  "duration_ms": 1,
+  "evidence": ".cursor/skills/verify-o8/evidence/run-20260909-234832/project-list.txt",
+  "timestamp": "2026-09-09T23:48:33Z"
+}
+{
+  "check": "brain-ask",
+  "description": "Engineering Brain Q&A",
+  "status": "failed",
+  "exitCode": 127,
+  "duration_ms": 1,
+  "evidence": ".cursor/skills/verify-o8/evidence/run-20260909-234832/brain-ask.txt",
+  "timestamp": "2026-09-09T23:48:33Z"
+}
+]
+,
+  "completed": "2026-09-09T23:48:33Z",
+  "summary": {
+    "passed": 0,
+    "failed": 9,
+    "inconclusive": 4,
+    "total": 13
+  }
+}
