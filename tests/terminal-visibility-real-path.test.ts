@@ -36,6 +36,8 @@ const plainSessionName = `cortex-plain-visibility-${process.pid}`;
 const OVERFLOW_TERMINAL = { cols: 120, rows: 30 } as const;
 const DUPLICATE_TERMINAL = { cols: 120, rows: 40 } as const;
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-terminal-visibility-'));
+const tmuxEnv: NodeJS.ProcessEnv = { ...process.env, HOME: dataDir, TMUX_TMPDIR: dataDir };
+delete tmuxEnv.TMUX;
 const token = `terminal-visibility-${process.pid}`;
 const sockets = new Set<WebSocket>();
 let apiServer: Server;
@@ -76,21 +78,26 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, description:
 
 async function startWsServer() {
   serverOutput = '';
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: dataDir,
+    SHELL: '/bin/sh',
+    TMUX_TMPDIR: dataDir,
+    O8_DATA_DIR: dataDir,
+    CORTEX_IDE_DATA_DIR: dataDir,
+    O8_API_PORT: String(apiPort),
+    O8_WS_PORT: String(wsPort),
+    O8_PERSISTENT_TERMINALS: '1',
+    NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`,
+  };
+  delete env.TMUX;
   wsProcess = execFile(process.execPath, [
     '--import=./scripts/register-server-only-stub.mjs',
     '--import=tsx',
     'src/ws-server.ts',
   ], {
     cwd: process.cwd(),
-    env: {
-      ...process.env,
-      O8_DATA_DIR: dataDir,
-      CORTEX_IDE_DATA_DIR: dataDir,
-      O8_API_PORT: String(apiPort),
-      O8_WS_PORT: String(wsPort),
-      O8_PERSISTENT_TERMINALS: '1',
-      NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`,
-    },
+    env,
   });
   wsProcess.stdout?.on('data', (chunk) => { serverOutput += String(chunk); });
   wsProcess.stderr?.on('data', (chunk) => { serverOutput += String(chunk); });
@@ -148,8 +155,43 @@ function terminalText(received: ReceivedFrame[], startIndex = 0, targetSession =
     .join('');
 }
 
-function capturePane(targetSession = sessionName) {
-  return execFileSync('tmux', ['capture-pane', '-p', '-t', targetSession], { encoding: 'utf8' });
+function capturePane(target = sessionName) {
+  return execFileSync('tmux', ['capture-pane', '-p', '-t', target], { encoding: 'utf8', env: tmuxEnv });
+}
+
+function tmuxPaneId(targetSession = sessionName) {
+  const panes = execFileSync(
+    'tmux',
+    ['list-panes', '-a', '-F', '#{session_name}\t#{pane_id}\t#{pane_current_command}'],
+    { encoding: 'utf8', env: tmuxEnv },
+  ).trim().split('\n').map((line) => line.split('\t')).filter(([name, , command]) => (
+    name === targetSession && command === 'sh'
+  ));
+  if (panes.length !== 1 || !panes[0][1]) {
+    throw new Error(`Expected one sh pane for ${targetSession}, received ${panes.length}`);
+  }
+  return panes[0][1];
+}
+
+function tmuxPaneDimensions(paneId: string) {
+  const [cols, rows] = execFileSync(
+    'tmux',
+    ['display-message', '-p', '-t', paneId, '#{pane_width}\t#{pane_height}'],
+    { encoding: 'utf8', env: tmuxEnv },
+  ).trim().split('\t').map(Number);
+  if (!Number.isSafeInteger(cols) || !Number.isSafeInteger(rows) || cols <= 0 || rows <= 0) {
+    throw new Error(`Invalid tmux pane dimensions for ${paneId}: ${cols}x${rows}`);
+  }
+  return { cols, rows };
+}
+
+function respawnPaneWithNodeScript(paneId: string, filename: string, script: string) {
+  const scriptPath = join(dataDir, filename);
+  writeFileSync(scriptPath, script);
+  execFileSync('tmux', [
+    'respawn-pane', '-k', '-t', paneId,
+    `${JSON.stringify(process.execPath)} ${JSON.stringify(scriptPath)}`,
+  ], { env: tmuxEnv });
 }
 
 function normalizeTerminalLines(lines: string[]) {
@@ -201,6 +243,7 @@ async function quiescentOracle(
   client: { received: ReceivedFrame[] },
   targetSession: string,
   timeoutMs = 20_000,
+  targetPane = targetSession,
 ) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -210,10 +253,10 @@ async function quiescentOracle(
       await new Promise((resolve) => setTimeout(resolve, 20));
       continue;
     }
-    const first = capturePane(targetSession);
+    const first = capturePane(targetPane);
     const dataCount = matchingData.length;
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const second = capturePane(targetSession);
+    const second = capturePane(targetPane);
     const currentData = terminalFrames(client.received, 0, targetSession);
     const currentLastDataAt = currentData.at(-1)?.at ?? 0;
     if (
@@ -255,8 +298,8 @@ afterAll(async () => {
   for (const socket of sockets) socket.close();
   await stopWsServer().catch(() => undefined);
   if (apiServer?.listening) await new Promise<void>((resolve) => apiServer.close(() => resolve()));
-  try { execFileSync('tmux', ['kill-session', '-t', sessionName], { stdio: 'ignore' }); } catch { /* not created */ }
-  try { execFileSync('tmux', ['kill-session', '-t', duplicateSessionName], { stdio: 'ignore' }); } catch { /* not created */ }
+  try { execFileSync('tmux', ['kill-session', '-t', sessionName], { stdio: 'ignore', env: tmuxEnv }); } catch { /* not created */ }
+  try { execFileSync('tmux', ['kill-session', '-t', duplicateSessionName], { stdio: 'ignore', env: tmuxEnv }); } catch { /* not created */ }
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -282,14 +325,16 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
     await waitFor(() => visible.received.some(({ frame }) => frame.event === 'visibility-ready' && frame.data?.epoch === 1), 'visible acknowledgement');
     const pidBefore = (await spawnOrReadPty(sessionName)).pid;
     expect(pidBefore).toBeTypeOf('number');
+    const paneId = tmuxPaneId(sessionName);
+    const paneDimensions = tmuxPaneDimensions(paneId);
 
     const visibleStart = visible.received.length;
     const hiddenStart = hidden.received.length;
-    visible.socket.send(JSON.stringify({
-      type: 'terminal-input',
-      sessionName,
-      data: "i=0; while [ $i -lt 40 ]; do printf 'O8SEQ_%03d\\n' \"$i\"; i=$((i+1)); sleep 0.025; done\r",
-    }));
+    respawnPaneWithNodeScript(
+      paneId,
+      'visible-sequence.cjs',
+      "let i=0;const timer=setInterval(()=>{process.stdout.write(`O8SEQ_${String(i).padStart(3,'0')}\\n`);i+=1;if(i>=40){clearInterval(timer);setTimeout(()=>{},10000);}},25);",
+    );
     await waitFor(() => terminalText(visible.received, visibleStart).includes('O8SEQ_039'), 'visible sequence');
     await waitFor(() => terminalText(hidden.received, hiddenStart).includes('O8SEQ_039'), 'hidden coalesced sequence');
 
@@ -300,17 +345,17 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
     const hiddenIntervals = hiddenData.slice(1).map((entry, index) => entry.at - hiddenData[index].at);
     expect(Math.min(...hiddenIntervals)).toBeGreaterThan(175);
 
-    const paintedRows = Array.from({ length: OVERFLOW_TERMINAL.rows }, (_, index) => (
-      `O8_RESYNC_ROW_${String(index).padStart(2, '0')}${index === OVERFLOW_TERMINAL.rows - 1 ? ' O8_OVERFLOW_DONE' : ''}`
+    const paintedRows = Array.from({ length: paneDimensions.rows }, (_, index) => (
+      `O8_RESYNC_ROW_${String(index).padStart(2, '0')}${index === paneDimensions.rows - 1 ? ' O8_OVERFLOW_DONE' : ''}`
     ));
-    const paintedScreen = `${paintedRows.join('\n')}\n`;
-    const overflowScript = `const line='Z'.repeat(4095)+'\\n';let elapsed=0;const timer=setInterval(()=>{process.stdout.write(line);elapsed+=5;if(elapsed>=400){clearInterval(timer);process.stdout.write(Buffer.from('${Buffer.from(paintedScreen).toString('base64')}','base64'));}},5)`;
-    visible.socket.send(JSON.stringify({
-      type: 'terminal-input',
-      sessionName,
-      data: `${process.execPath} -e "${overflowScript}"\r`,
-    }));
-    await waitFor(() => terminalText(visible.received, visibleStart).includes('O8_OVERFLOW_DONE'), 'overflow command completion');
+    const paintedScreen = `\x1b[?1049h\x1b[2J\x1b[H${paintedRows
+      .map((line, index) => `\x1b[${index + 1};1H${line}`)
+      .join('')}`;
+    const overflowScript = `const line='Z'.repeat(4095)+'\\n';let elapsed=0;const timer=setInterval(()=>{process.stdout.write(line);elapsed+=5;if(elapsed>=3000){clearInterval(timer);process.stdout.write(Buffer.from('${Buffer.from(paintedScreen).toString('base64')}','base64'));setTimeout(()=>{},10000);}},5)`;
+    visible.socket.close();
+    await once(visible.socket, 'close');
+    expect(sockets.has(visible.socket)).toBe(false);
+    respawnPaneWithNodeScript(paneId, 'hidden-overflow.cjs', overflowScript);
     await waitFor(() => hidden.received.some(({ frame }) => (
       frame.event === 'diagnostic' && frame.data?.code === 'terminal_hidden_overflow'
     )), 'hidden overflow diagnostic');
@@ -318,7 +363,7 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
     expect(overflow?.frame.data?.lastGoodOffset).toBeTypeOf('number');
 
     await waitFor(
-      () => terminalText(visible.received, visibleStart).includes('O8_RESYNC_ROW_29 O8_OVERFLOW_DONE'),
+      () => capturePane(paneId).includes('O8_OVERFLOW_DONE'),
       'full resync screen paint',
     );
 
@@ -333,7 +378,13 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
     expect(resync?.data?.historyTruncated).toBe(false);
     const snapshot = Buffer.from(resync?.data?.data ?? '', 'base64').toString('utf8');
     expect(snapshot).toContain('O8_OVERFLOW_DONE');
-    const oracle = await quiescentOracle(hidden, sessionName);
+    expect(snapshot).not.toContain('[terminal snapshot unavailable; replaying retained history]');
+    expect(hidden.received.slice(revealStart).some(({ frame }) => (
+      frame.event === 'diagnostic' && frame.data?.code === 'terminal_resync_failed'
+    ))).toBe(false);
+    const oracle = await quiescentOracle(hidden, sessionName, 20_000, paneId);
+    const oracleRows = oracle.length;
+    expect(oracleRows).toBeGreaterThan(0);
     const snapshotBuffer = await renderTerminalBytes(
       [snapshot],
       { ...OVERFLOW_TERMINAL, scrollback: 20_000, trimTrailingBlankLines: false },
@@ -341,14 +392,14 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
     const snapshotScreen = snapshotBuffer.slice(-OVERFLOW_TERMINAL.rows)
       .map((line) => line.replace(/\s+$/u, ''));
     // Tmux history cannot be compared because xterm.js drops CSI n S scrolls (#1979).
-    assertRenderedScreen(snapshotScreen, oracle, OVERFLOW_TERMINAL.rows);
+    assertRenderedScreen(snapshotScreen, oracle, oracleRows);
     const reconstruction = await reconstructedText(
       hidden.received,
       resyncIndex,
       sessionName,
       OVERFLOW_TERMINAL,
     );
-    assertRenderedScreen(reconstruction, oracle, OVERFLOW_TERMINAL.rows);
+    assertRenderedScreen(reconstruction, oracle, oracleRows);
     expect(hidden.received.slice(revealStart).some(({ frame }) => (
       frame.event === 'diagnostic' && frame.data?.code === 'terminal_resync_unsettled'
     ))).toBe(false);

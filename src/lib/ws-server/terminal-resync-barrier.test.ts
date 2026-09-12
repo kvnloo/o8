@@ -100,4 +100,30 @@ describe('terminal resync barrier', () => {
     expect(terminalResyncFreshnessLine(['old\r\n\x1b]0;title\x07\x1b[31m newest line \x1b[0m\r\n']))
       .toBe('newest line');
   });
+
+  it('extracts the last cursor-addressed row without spanning painted rows', () => {
+    expect(terminalResyncFreshnessLine([
+      '\x1b[2J\x1b[H\x1b[1;1Hfirst painted row\x1b[2Hsecond painted row',
+    ])).toBe('second painted row');
+  });
+
+  it('accepts a fresh cursor-addressed capture and rejects a genuinely stale one', async () => {
+    const paint = '\x1b[2J\x1b[H\x1b[1;1HLIVE_ROW_A\x1b[2;1HLIVE_ROW_B';
+    const run = (capture: string) => waitForTerminalResyncBarrier({
+      getLastOutputAt: () => 0,
+      getBatchBuffer: () => '',
+      getScrollbackChunks: () => [paint],
+      capture: () => ({ ok: true, data: capture }),
+      isCancelled: () => false,
+      now: () => 1_000,
+      wait: async () => undefined,
+    });
+
+    await expect(run('LIVE_ROW_A\nLIVE_ROW_B\n')).resolves.toMatchObject({
+      status: 'ready', captureAttempts: 1, fallbackReason: null, freshnessLine: 'LIVE_ROW_B',
+    });
+    await expect(run('OLD_ROW_A\nOLD_ROW_B\n')).resolves.toMatchObject({
+      status: 'ready', captureAttempts: 2, fallbackReason: 'stale-snapshot', freshnessLine: 'LIVE_ROW_B',
+    });
+  });
 });
