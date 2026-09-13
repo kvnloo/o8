@@ -11,6 +11,7 @@ mod cli_locate;
 mod dev_frontend;
 mod desktop_close;
 mod dictation_history;
+mod display_refresh;
 mod dock_window;
 #[cfg(target_os = "macos")]
 mod first_run_install;
@@ -7135,6 +7136,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_desktop_info,
+            display_refresh::get_display_refresh,
             get_running_bundle_integrity,
             check_port,
             restart_app,

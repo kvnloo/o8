@@ -5,6 +5,7 @@
 export {
   isTauri,
   getDesktopInfo,
+  getDisplayRefresh,
   checkPort,
   startWsServer,
   cortexAvailable,
@@ -18,5 +19,6 @@ export {
 
 export type {
   DesktopInfo,
+  DisplayRefreshInfo,
   SidecarResult,
 } from './bridge';

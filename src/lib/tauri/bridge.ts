@@ -70,6 +70,13 @@ export interface DesktopInfo {
   arch: string;
 }
 
+export interface DisplayRefreshInfo {
+  native_hz: number | null;
+  scale_factor: number | null;
+  compositor: string;
+  gpu_backend: string;
+}
+
 export interface SidecarResult {
   ok: boolean;
   pid: number | null;
@@ -99,6 +106,15 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
  */
 export async function getDesktopInfo(): Promise<DesktopInfo | null> {
   return invoke<DesktopInfo>('get_desktop_info');
+}
+
+/**
+ * OS-advertised refresh rate for the window's screen (macOS NSScreen
+ * `maximumFramesPerSecond`). Linux/Windows return compositor identity with
+ * `native_hz` unset — JS rAF measurement is the webview truth there.
+ */
+export async function getDisplayRefresh(): Promise<DisplayRefreshInfo | null> {
+  return invoke<DisplayRefreshInfo>('get_display_refresh');
 }
 
 /**

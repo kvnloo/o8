@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { takeDesignFrames } from '@/lib/motion/js-cadence';
+import { DESIGN_FRAME_MS } from '@/lib/motion/pipeline';
 
 /**
  * Advance the reveal index, then extend to the next whitespace so whole WORDS
@@ -10,7 +12,7 @@ import { useEffect, useRef, useState } from 'react';
  * so the reveal is largely cosmetic: it must make a done answer feel like fast
  * live streaming, not "the answer is ready but it's slowly typing it out." So
  * step = 20% of the remaining backlog (drains a big chunk quickly) capped at 32
- * chars/frame (~1900 chars/s at 60fps) — fast, but still a continuous stream,
+ * chars per 60 Hz design frame (~1900 chars/s) — fast, but still a continuous stream,
  * never the front-loaded 185/145/115-char spike that read as "shooting in". The
  * proportional term also means a genuinely incremental backend stream is matched
  * gently (small backlog → small step), and it eases the last ~160 chars to a
@@ -18,6 +20,15 @@ import { useEffect, useRef, useState } from 'react';
  * reveals a step's worth, so text appears the instant the chunk lands. Pure +
  * synchronous so it's unit-testable without rAF.
  */
+export function advanceRevealByDesignFrames(current: number, text: string, frames: number): number {
+  let index = current;
+  const count = Number.isFinite(frames) ? Math.max(0, Math.floor(frames)) : 0;
+  for (let step = 0; step < count && index < text.length; step += 1) {
+    index = nextRevealIndex(index, text);
+  }
+  return index;
+}
+
 export function nextRevealIndex(current: number, text: string): number {
   const len = text.length;
   if (current >= len) return len;
@@ -48,7 +59,8 @@ function prefersReducedMotion(): boolean {
  *
  * The rAF loop self-stops when caught up and restarts on the next burst (no idle
  * churn between deltas), and reads the target via a ref so it never streams a
- * stale closure's text.
+ * stale closure's text. Reveal speed is locked to a 60 Hz design cadence so a
+ * 120/240/540 Hz panel cannot 2–9× the React commit rate.
  */
 export function useSmoothText(text: string, streaming: boolean): string {
   const reduced = prefersReducedMotion();
@@ -66,6 +78,8 @@ export function useSmoothText(text: string, streaming: boolean): string {
   targetRef.current = text;
   const rafRef = useRef<number | null>(null);
   const runningRef = useRef(false);
+  const accRef = useRef(0);
+  const lastTsRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (streaming) everStreamedRef.current = true;
@@ -76,6 +90,8 @@ export function useSmoothText(text: string, streaming: boolean): string {
     if (animate) return;
     if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     runningRef.current = false;
+    accRef.current = 0;
+    lastTsRef.current = null;
     idxRef.current = targetRef.current.length;
     setRevealed(targetRef.current.length);
   }, [animate, text]);
@@ -85,12 +101,24 @@ export function useSmoothText(text: string, streaming: boolean): string {
   // restarts it. Reads target via ref → no stale closure.
   useEffect(() => {
     if (!animate) return;
-    if (idxRef.current > targetRef.current.length) { idxRef.current = 0; setRevealed(0); } // hook reused by a new stream
-    const tick = () => {
-      const next = nextRevealIndex(idxRef.current, targetRef.current);
-      idxRef.current = next;
-      setRevealed(next);
-      if (next < targetRef.current.length) {
+    if (idxRef.current > targetRef.current.length) {
+      idxRef.current = 0;
+      setRevealed(0);
+      accRef.current = 0;
+      lastTsRef.current = null;
+    }
+    const tick = (ts: number) => {
+      const last = lastTsRef.current;
+      lastTsRef.current = ts;
+      const dt = last == null ? DESIGN_FRAME_MS : ts - last;
+      const taken = takeDesignFrames(accRef.current, dt);
+      accRef.current = taken.remainderMs;
+      if (taken.frames > 0) {
+        const next = advanceRevealByDesignFrames(idxRef.current, targetRef.current, taken.frames);
+        idxRef.current = next;
+        setRevealed(next);
+      }
+      if (idxRef.current < targetRef.current.length) {
         rafRef.current = requestAnimationFrame(tick);
       } else {
         runningRef.current = false;
@@ -99,6 +127,7 @@ export function useSmoothText(text: string, streaming: boolean): string {
     };
     if (!runningRef.current && idxRef.current < targetRef.current.length) {
       runningRef.current = true;
+      lastTsRef.current = null;
       rafRef.current = requestAnimationFrame(tick);
     }
   }, [animate, text, streaming]);
@@ -107,6 +136,8 @@ export function useSmoothText(text: string, streaming: boolean): string {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     runningRef.current = false;
+    accRef.current = 0;
+    lastTsRef.current = null;
   }, []);
 
   return animate ? targetRef.current.slice(0, revealed) : text;
