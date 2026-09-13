@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 import { installLongLivedFetchBudgetGuard } from '@/lib/connection-budget';
+import { keepWaitingForPaint } from '@/lib/motion/paint-deadline';
+import { getDisplayRefresh, isTauri } from '@/lib/tauri/bridge';
 
 // The pre-ship boot gate (scripts/preship-webview-gate.mjs) treats
 // `data-o8-dashboard-hydrated` as proof the dashboard booted cleanly. We only
@@ -18,24 +20,32 @@ export function DashboardHydrationMarker() {
     root.removeAttribute('data-o8-dashboard-hydrated');
 
     let raf = 0;
-    let frames = 0;
-    // ~10s ceiling at 60fps — far above the gate's own 60s health deadline, so
-    // the gate owns the timeout; we just refuse to claim health before paint.
-    const MAX_FRAMES = 600;
+    const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
     const check = () => {
-      if (root.getAttribute('data-o8-mount-error') === '1') return; // crashed — stay silent
+      const crashed = root.getAttribute('data-o8-mount-error') === '1';
       const ws = document.querySelector('[data-o8-workspace]');
       const painted = ws instanceof HTMLElement && ws.offsetHeight > 0 && ws.offsetWidth > 0;
       if (painted) {
         root.setAttribute('data-o8-dashboard-hydrated', '1');
         return;
       }
-      if (frames++ < MAX_FRAMES) {
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (keepWaitingForPaint(now - started, painted, crashed)) {
         raf = window.requestAnimationFrame(check);
       }
     };
     raf = window.requestAnimationFrame(check);
+
+    if (isTauri()) {
+      void getDisplayRefresh().then((info) => {
+        if (!info) return;
+        const hz = info.native_hz == null ? 'unknown' : `${info.native_hz}Hz`;
+        console.info(
+          `[display-refresh] compositor=${info.compositor} gpu=${info.gpu_backend} native=${hz} scale=${info.scale_factor ?? 'n/a'}`,
+        );
+      });
+    }
 
     return () => window.cancelAnimationFrame(raf);
   }, []);

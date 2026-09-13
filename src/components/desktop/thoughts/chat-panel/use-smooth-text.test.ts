@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextRevealIndex } from './use-smooth-text';
+import { advanceRevealByDesignFrames, nextRevealIndex } from './use-smooth-text';
 
 describe('nextRevealIndex (smooth streaming reveal stepping)', () => {
   it('returns the length when already caught up', () => {
@@ -74,5 +74,17 @@ describe('nextRevealIndex (smooth streaming reveal stepping)', () => {
   it('always moves by at least the minimum step on a slow trickle', () => {
     const text = 'abcdefghij';
     expect(nextRevealIndex(0, text)).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('advanceRevealByDesignFrames', () => {
+  it('does not advance when zero design frames have elapsed (540 Hz rAF)', () => {
+    const text = 'alpha bravo charlie delta';
+    expect(advanceRevealByDesignFrames(0, text, 0)).toBe(0);
+  });
+
+  it('matches a single nextRevealIndex step for one design frame', () => {
+    const text = 'alpha bravo charlie delta';
+    expect(advanceRevealByDesignFrames(0, text, 1)).toBe(nextRevealIndex(0, text));
   });
 });

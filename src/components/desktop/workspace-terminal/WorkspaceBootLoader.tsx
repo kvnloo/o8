@@ -18,6 +18,7 @@
  */
 
 import { memo, useEffect, useRef } from 'react';
+import { startSimLoop } from '@/lib/motion/sim-loop';
 
 const RAMP = ' .:-=+*#%@';
 const CELL = 6;
@@ -101,15 +102,8 @@ function WorkspaceBootLoaderBase() {
     ro.observe(canvas);
 
     const last = RAMP.length - 1;
-    let raf = 0;
     let start = 0;
-    let lastFrame = 0;
-    const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
-
-    function frame(ts: number) {
-      raf = requestAnimationFrame(frame);
-      if (ts - lastFrame < 1000 / 30) return;
-      lastFrame = ts;
+    const loop = startSimLoop((ts) => {
       if (!start) start = ts;
       const t = (ts - start) / 1000;
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -150,12 +144,10 @@ function WorkspaceBootLoaderBase() {
         if (ch === ' ') continue;
         ctx!.fillText(ch, cell.i * CELL, cell.j * CELL);
       }
-    }
-    raf = requestAnimationFrame(frame);
-    start = now();
+    }, { maxHz: 30 });
 
     return () => {
-      cancelAnimationFrame(raf);
+      loop.stop();
       ro.disconnect();
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerleave', onPointerLeave);
