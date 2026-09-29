@@ -98,7 +98,7 @@ function Harness({
   );
 }
 
-function O8PlanHarness({ hasOwnGoogleKey = false }: { hasOwnGoogleKey?: boolean } = {}) {
+function O8PlanHarness({ hasOwnGoogleKey = false }: { hasOwnGoogleKey?: boolean }) {
   return <Harness initialModel="o8-free" initialBackend="o8" initialEffort="low" effortTestId="o8-plan-effort" hasOwnGoogleKey={hasOwnGoogleKey} />;
 }
 
