@@ -88,12 +88,15 @@ export function composerRuntimeLabel(runtime: OrchestratorRuntime): string {
   return runtime === 'opencode' ? 'OpenCode' : getRuntimeCapability(runtime).label;
 }
 
+/** o8 High is member-key-gated — never a paid-plan perk label. */
+export const O8_HIGH_EFFORT_OWN_GOOGLE_KEY_LABEL = 'own Google key';
+
 export function composerEffortConsequence(
   backend: OrchestratorBackendSetting,
   effort: ThinkingEffort,
 ): string {
   if (backend === 'o8') {
-    return `${THINKING_EFFORT_LABELS[effort].long} · ${effort === 'high' ? 'founders' : 'free'}`;
+    return `${THINKING_EFFORT_LABELS[effort].long} · ${effort === 'high' ? O8_HIGH_EFFORT_OWN_GOOGLE_KEY_LABEL : 'free'}`;
   }
   return THINKING_EFFORT_LABELS[effort].detail;
 }
@@ -176,6 +179,8 @@ export interface ResolveComposerSelectorInput {
   adaptiveEnabled: boolean;
   ultraEnabled?: boolean;
   isFreePlan?: boolean;
+  /** True when GOOGLE_AI_API_KEY is present in the member environment (boolean only). */
+  hasOwnGoogleKey?: boolean;
   inSessionSettings?: ComposerSelectorSettingState;
   threadSettings?: ComposerSelectorSettingState;
   operatorDefaultSettings?: ComposerSelectorSettingState;
@@ -301,14 +306,21 @@ export function resolveComposerSelectorExecutionMode(mode: ComposerSelectorMode)
   return 'fleet';
 }
 
+/**
+ * o8_high_effort_requires_own_google_key — High on the o8 lead is offered only
+ * when the member's own Google key is present. Paid vs free must not diverge,
+ * and High must never appear as a locked upgrade tease.
+ */
 export function supportedEffortsForLead(
   backend: OrchestratorBackendSetting,
   modelId: string,
   adaptiveEnabled: boolean,
   isFreePlan = false,
   ultraEnabled = false,
+  hasOwnGoogleKey = false,
 ): readonly ThinkingEffort[] {
-  if (backend === 'o8') return isFreePlan ? ['low'] : ['low', 'high'];
+  void isFreePlan; // retained for call-site positional compatibility; o8 High is key-gated
+  if (backend === 'o8') return hasOwnGoogleKey ? ['low', 'high'] : ['low'];
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
   const base = adaptiveEnabled ? [...BASE_EFFORTS] : BASE_EFFORTS.filter((effort) => effort !== 'adaptive');
   const supportsMax = backend === 'codex' && codexSupportsReasoningEffort(modelId, 'max');
@@ -354,8 +366,9 @@ export function setModelEffort(
 export function resolveComposerSelectorState(input: ResolveComposerSelectorInput): ResolvedComposerSelectorState {
   const storedEffort = input.inSessionEffortByModel[input.leadModelId]
     ?? input.threadEffortByModel[input.leadModelId];
+  const hasOwnGoogleKey = input.hasOwnGoogleKey === true;
   const requestedEffort = input.leadBackend === 'o8'
-    ? input.isFreePlan ? 'low' : storedEffort ?? 'high'
+    ? hasOwnGoogleKey ? storedEffort ?? 'high' : 'low'
     : storedEffort ?? input.operatorDefaultEffort;
   const effortOptions = supportedEffortsForLead(
     input.leadBackend,
@@ -363,10 +376,10 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     input.adaptiveEnabled,
     input.isFreePlan,
     input.ultraEnabled,
+    hasOwnGoogleKey,
   );
-  const lockedEffortOptions: readonly ThinkingEffort[] = input.leadBackend === 'o8' && input.isFreePlan
-    ? ['high']
-    : [];
+  // o8 never locks High as an upgrade tease — free and paid share the key gate.
+  const lockedEffortOptions: readonly ThinkingEffort[] = [];
   const clamped = clampEffortToLead(requestedEffort, effortOptions);
   const effort = clamped.effort;
   const clampedFrom = clamped.clampedFrom

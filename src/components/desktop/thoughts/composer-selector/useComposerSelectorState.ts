@@ -59,6 +59,7 @@ export function useComposerSelectorState(input: {
   threadId: string | null;
   repoPath?: string | null;
   isFreePlan?: boolean;
+  hasOwnGoogleKey?: boolean;
   onModeChange?: (mode: ComposerSelectorMode) => void;
   onModelRestore?: (model: string) => void;
   onModelChange?: (model: string) => void;
@@ -78,6 +79,7 @@ export function useComposerSelectorState(input: {
     threadId,
     repoPath,
     isFreePlan: freePlanOverride,
+    hasOwnGoogleKey: hasOwnGoogleKeyOverride = false,
     onModeChange: changeMode,
     onModelRestore: restoreModel,
     onModelChange: changeModel,
@@ -115,6 +117,7 @@ export function useComposerSelectorState(input: {
   const adoptingParentModeRef = useRef<ComposerSelectorMode | undefined>(undefined);
   const { plan } = useEntitlement();
   const isFreePlan = freePlanOverride ?? plan === 'free';
+  const hasOwnGoogleKey = hasOwnGoogleKeyOverride === true;
   const ultraEnabled = useUltraEffortPreference();
   const { groups: baseComposerModelGroups } = useComposerModelCatalogue();
 
@@ -233,6 +236,7 @@ export function useComposerSelectorState(input: {
     adaptiveEnabled,
     ultraEnabled,
     isFreePlan,
+    hasOwnGoogleKey,
     inSessionSettings: {
       ...(inSessionMode ? { mode: inSessionMode } : {}),
       ...(workerOverrides.defaultDispatchRuntime
@@ -267,6 +271,7 @@ export function useComposerSelectorState(input: {
     operatorDefaultEffort,
     operatorWorkerDefaults.defaultDispatchRuntime,
     operatorWorkerDefaults.workerStartMode,
+    hasOwnGoogleKey,
     isFreePlan,
     resolvedModelLabel,
     storedEfforts,
@@ -289,7 +294,7 @@ export function useComposerSelectorState(input: {
 
   useEffect(() => {
     if (!enabled || !modelId || !backend) return;
-    const resolutionKey = `${threadId ?? ''}:${backend}:${modelId}:${adaptiveEnabled}:${ultraEnabled}:${isFreePlan}`;
+    const resolutionKey = `${threadId ?? ''}:${backend}:${modelId}:${adaptiveEnabled}:${ultraEnabled}:${isFreePlan}:${hasOwnGoogleKey}`;
     if (lastResolvedModelRef.current === resolutionKey) return;
     lastResolvedModelRef.current = resolutionKey;
     const effortKey = sessionEffortKey(threadId);
@@ -308,7 +313,7 @@ export function useComposerSelectorState(input: {
     }
     if (resolved.effort !== effort) changeEffort(resolved.effort);
     return () => { cancelled = true; };
-  }, [adaptiveEnabled, backend, changeEffort, effort, enabled, isFreePlan, modelId, resolved.effort, resolved.effortClampedFrom, threadId, ultraEnabled]);
+  }, [adaptiveEnabled, backend, changeEffort, effort, enabled, hasOwnGoogleKey, isFreePlan, modelId, resolved.effort, resolved.effortClampedFrom, threadId, ultraEnabled]);
 
   const onModeChange = useCallback((nextMode: ComposerSelectorMode) => {
     requestedModeRef.current = nextMode;
@@ -320,7 +325,7 @@ export function useComposerSelectorState(input: {
   const onEffortChange = useCallback((nextEffort: ThinkingEffort) => {
     setClampNotice(null);
     const supported = backend
-      ? supportedEffortsForLead(backend, modelId ?? '', adaptiveEnabled, isFreePlan, ultraEnabled)
+      ? supportedEffortsForLead(backend, modelId ?? '', adaptiveEnabled, isFreePlan, ultraEnabled, hasOwnGoogleKey)
       : [nextEffort];
     const change = resolveSupportedEffortChange(nextEffort, effort, supported);
     if (!change.accepted) {
@@ -340,7 +345,7 @@ export function useComposerSelectorState(input: {
     );
     writeComposerModelEffort(modelId, change.effort, threadId);
     changeEffort(change.effort);
-  }, [adaptiveEnabled, backend, changeEffort, effort, isFreePlan, modelId, threadId, ultraEnabled]);
+  }, [adaptiveEnabled, backend, changeEffort, effort, hasOwnGoogleKey, isFreePlan, modelId, threadId, ultraEnabled]);
 
   const onModelChange = useCallback((nextModel: string) => {
     if (modelId) {
@@ -416,6 +421,7 @@ export function useComposerSelectorState(input: {
     refreshWorkerDefaults: refetchWorkerDefaults,
     clampNotice,
     isFreePlan,
+    hasOwnGoogleKey,
     savingWorkerDefaults,
     workerModelLocked,
   };

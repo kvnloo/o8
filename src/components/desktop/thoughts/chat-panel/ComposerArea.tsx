@@ -92,6 +92,8 @@ interface ComposerAreaProps {
   promptStash?: PromptStashContext & { onRestore: (text: string) => void };
   voiceModeEnabled?: boolean;
   onVoiceModeChange?: (enabled: boolean) => void;
+  /** Member GOOGLE_AI_API_KEY present — gates o8 High (boolean only). */
+  hasOwnGoogleKey?: boolean;
 }
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
@@ -153,6 +155,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   promptStash,
   voiceModeEnabled,
   onVoiceModeChange,
+  hasOwnGoogleKey = false,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
@@ -174,6 +177,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     adaptiveEnabled,
     threadId: sessionRulesThreadId ?? null,
     repoPath,
+    hasOwnGoogleKey,
     onModeChange: onComposerModeChange,
     onModelRestore,
     onModelChange,

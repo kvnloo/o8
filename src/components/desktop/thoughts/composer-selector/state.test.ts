@@ -126,29 +126,56 @@ describe('composer selector state', () => {
     expect(['low', 'medium', 'adaptive', 'high'].some((effort) => isHotComposerEffort(effort as ThinkingEffort))).toBe(false);
   });
 
-  it('keeps the free backend on its real low tier while exposing both o8 tiers', () => {
-    const resolved = resolveComposerSelectorState({
-      mode: 'solo',
-      leadModelId: 'o8-free',
-      leadModelLabel: 'o8',
-      leadBackend: 'o8',
-      inSessionEffortByModel: { 'o8-free': 'high' },
-      threadEffortByModel: {},
-      operatorDefaultEffort: 'max',
-      adaptiveEnabled: true,
-      isFreePlan: true,
-      workerRuntimeLabel: 'Codex',
-    });
+  it('o8_high_effort_requires_own_google_key: free and paid match when the key is absent', () => {
+    for (const isFreePlan of [true, false]) {
+      const resolved = resolveComposerSelectorState({
+        mode: 'solo',
+        leadModelId: 'o8-free',
+        leadModelLabel: 'o8',
+        leadBackend: 'o8',
+        inSessionEffortByModel: { 'o8-free': 'high' },
+        threadEffortByModel: {},
+        operatorDefaultEffort: 'max',
+        adaptiveEnabled: true,
+        isFreePlan,
+        hasOwnGoogleKey: false,
+        workerRuntimeLabel: 'Codex',
+      });
 
-    expect(resolved.effort).toBe('low');
-    expect(resolved.effortOptions).toEqual(['low']);
-    expect(resolved.lockedEffortOptions).toEqual(['high']);
+      expect(resolved.effort, `plan free=${isFreePlan}`).toBe('low');
+      expect(resolved.effortOptions, `plan free=${isFreePlan}`).toEqual(['low']);
+      expect(resolved.lockedEffortOptions, `plan free=${isFreePlan}`).toEqual([]);
+      expect(supportedEffortsForLead('o8', 'o8-free', true, isFreePlan, false, false)).toEqual(['low']);
+    }
     expect(composerEffortConsequence('o8', 'low')).toBe('Low · free');
-    expect(composerEffortConsequence('o8', 'high')).toBe('High · founders');
   });
 
-  it('clamps a free o8 effort change before it reaches persistence callbacks', () => {
-    const supported = supportedEffortsForLead('o8', 'o8-free', true, true);
+  it('o8_high_effort_requires_own_google_key: High appears for any plan only with the member key', () => {
+    for (const isFreePlan of [true, false]) {
+      const resolved = resolveComposerSelectorState({
+        mode: 'solo',
+        leadModelId: 'o8-free',
+        leadModelLabel: 'o8',
+        leadBackend: 'o8',
+        inSessionEffortByModel: { 'o8-free': 'high' },
+        threadEffortByModel: {},
+        operatorDefaultEffort: 'max',
+        adaptiveEnabled: true,
+        isFreePlan,
+        hasOwnGoogleKey: true,
+        workerRuntimeLabel: 'Codex',
+      });
+
+      expect(resolved.effort, `plan free=${isFreePlan}`).toBe('high');
+      expect(resolved.effortOptions, `plan free=${isFreePlan}`).toEqual(['low', 'high']);
+      expect(resolved.lockedEffortOptions, `plan free=${isFreePlan}`).toEqual([]);
+      expect(supportedEffortsForLead('o8', 'o8-free', true, isFreePlan, false, true)).toEqual(['low', 'high']);
+    }
+    expect(composerEffortConsequence('o8', 'high')).toBe('High · own Google key');
+  });
+
+  it('clamps an o8 High request when the member Google key is absent', () => {
+    const supported = supportedEffortsForLead('o8', 'o8-free', true, false, false, false);
 
     expect(clampEffortToLead('high', supported)).toEqual({ effort: 'low', clampedFrom: 'high' });
     expect(resolveSupportedEffortChange('high', 'low', supported))

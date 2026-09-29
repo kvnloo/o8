@@ -46,11 +46,13 @@ function Harness({
   initialBackend = 'codex',
   initialEffort = 'high',
   effortTestId,
+  hasOwnGoogleKey = false,
 }: {
   initialModel?: string;
   initialBackend?: OrchestratorBackendSetting;
   initialEffort?: ThinkingEffort;
   effortTestId?: string;
+  hasOwnGoogleKey?: boolean;
 } = {}) {
   const [input, setInput] = useState('Build it');
   const [mode, setMode] = useState<ComposerSelectorMode>('solo');
@@ -90,13 +92,14 @@ function Harness({
         composerMode={mode}
         onComposerModeChange={setMode}
         sessionRulesThreadId="harness-thread"
+        hasOwnGoogleKey={hasOwnGoogleKey}
       />
     </>
   );
 }
 
-function O8PlanHarness() {
-  return <Harness initialModel="o8-free" initialBackend="o8" initialEffort="low" effortTestId="o8-plan-effort" />;
+function O8PlanHarness({ hasOwnGoogleKey = false }: { hasOwnGoogleKey?: boolean } = {}) {
+  return <Harness initialModel="o8-free" initialBackend="o8" initialEffort="low" effortTestId="o8-plan-effort" hasOwnGoogleKey={hasOwnGoogleKey} />;
 }
 
 function RealComposerHarness({ initialEffort = 'high', threadId = 'thread-test', operatorDefaultEffort = 'high' }: { initialEffort?: ThinkingEffort; threadId?: string; operatorDefaultEffort?: ThinkingEffort }) {
@@ -459,42 +462,27 @@ describe('ComposerSelectorFooter', () => {
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-house-o8"]')!.click());
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-o8-free"]')!.click());
     const o8Stops = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')];
-    expect(o8Stops).toHaveLength(2);
+    expect(o8Stops).toHaveLength(1);
     expect(o8Stops[0]?.textContent).toBe('Low');
     act(() => o8Stops[0]!.click());
     expect(container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('Low');
     expect(container.querySelector('[data-testid="composer-selector-effort-consequence"] > span > span:not([aria-hidden])')?.textContent).toBe('free');
     expect(container.querySelector('[data-testid="composer-selector-lead-effort"]')?.textContent).not.toContain('of 2');
-    act(() => o8Stops[1]!.click());
   });
 
-  it('shows but refuses the locked founders effort on the free o8 plan', async () => {
+  it('hides High on free o8 without the member Google key (no locked upgrade tease)', async () => {
     await act(async () => { root.render(createElement(O8PlanHarness)); });
     await openLeadEffort('o8', 'o8-free');
-    const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
-      .find((stop) => stop.textContent === 'High')!;
-
-    expect(high).not.toBeUndefined();
-    expect(high.getAttribute('aria-disabled')).toBe('true');
-    expect(high.style.color).toBe('var(--t-text-faint)');
-    expect(high.style.cursor).toBe('default');
-    expect(high.style.background).toBe('transparent');
-    act(() => high.click());
-    act(() => high.dispatchEvent(new KeyboardEvent('keydown', {
-      key: '†',
-      code: 'KeyT',
-      altKey: true,
-      bubbles: true,
-    })));
-
+    const stops = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')];
+    expect(stops.map((stop) => stop.textContent)).toEqual(['Low']);
+    expect(stops.some((stop) => stop.textContent === 'High')).toBe(false);
     expect(container.querySelector('[data-testid="o8-plan-effort"]')?.textContent).toBe('low');
-    expect(JSON.parse(localStorage.getItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY) ?? '{}')).toEqual({ 'o8-free': 'low' });
   });
 
-  it('selects and persists the founders effort on the paid o8 plan', async () => {
+  it('offers High labeled own Google key when the member key is present on paid o8', async () => {
     entitlementState.plan = 'founder';
     localStorage.setItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY, JSON.stringify({ 'o8-free': 'low' }));
-    await act(async () => { root.render(createElement(O8PlanHarness)); });
+    await act(async () => { root.render(createElement(O8PlanHarness, { hasOwnGoogleKey: true })); });
     await openLeadEffort('o8', 'o8-free');
     const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
       .find((stop) => stop.textContent === 'High')!;
@@ -503,6 +491,8 @@ describe('ComposerSelectorFooter', () => {
     act(() => high.click());
 
     expect(container.querySelector('[data-testid="o8-plan-effort"]')?.textContent).toBe('high');
+    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
+      .toContain('own Google key');
     expect(JSON.parse(localStorage.getItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY) ?? '{}'))
       .toEqual({ 'o8-free': 'high' });
   });

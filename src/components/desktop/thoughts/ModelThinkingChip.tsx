@@ -342,6 +342,7 @@ export function ModelThinkingChip({
   composerMode = 'solo',
   compact = false,
   split = false,
+  hasOwnGoogleKey = false,
 }: {
   modelLabel: string;
   modelId?: string;
@@ -353,6 +354,8 @@ export function ModelThinkingChip({
   onEffortChange?: (effort: ThinkingEffort) => void;
   composerMode?: ComposerMode;
   compact?: boolean;
+  /** Member GOOGLE_AI_API_KEY present — gates o8 High (boolean only, never the secret). */
+  hasOwnGoogleKey?: boolean;
   /** Quiet-text presentation (Q ruling 2026-07-11): model and thinking
       level render as two separate quiet-text triggers ("Fable 5" · "High")
       instead of one bordered chip with bars. Both open the shared menu. */
@@ -425,10 +428,8 @@ export function ModelThinkingChip({
   // levels we can't actually steer (Q ruling 2026-07-11).
   const thinkingKnown = activeBackend === 'claude' || activeBackend === 'fable'
     || activeBackend === 'codex' || activeBackend === 'auto';
-  // o8 tiers (Q ruling 2026-07-12): Low = the free rail, High = the founders
-  // rail. Founders default High, free defaults Low, and High never renders for
-  // the free plan — the proxy enforces the same gate server-side, this is
-  // just the honest UI for it. Mode rows (Solo/Collide) stay hidden for o8.
+  // o8 tiers: Low always; High only when the member's own Google key is present
+  // (o8_high_effort_requires_own_google_key). Paid vs free must not diverge.
   const isO8Backend = activeBackend === 'o8';
   const { plan: entitlementPlan } = useEntitlement();
   const isFreePlan = entitlementPlan === 'free';
@@ -438,6 +439,7 @@ export function ModelThinkingChip({
     adaptiveEnabled,
     isFreePlan,
     ultraEnabled,
+    hasOwnGoogleKey,
   );
   // Backends without steerable thinking expose no effort stops. o8 keeps its
   // own plan-gated Low/High options from the shared support resolver.
@@ -448,7 +450,7 @@ export function ModelThinkingChip({
     effort: option,
     label: THINKING_EFFORT_LABELS[option].long,
     sub: isO8Backend
-      ? option === 'high' ? 'founders' : 'free'
+      ? option === 'high' ? 'own Google key' : 'free'
       : option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
   }));
   const currentEffortIndex = Math.max(0, options.indexOf(effort));
@@ -669,11 +671,9 @@ export function ModelThinkingChip({
                               }
                               // Drop an effort only when the shared verified catalog excludes it.
                               if (!codexSupportsReasoningEffort(option.model, 'ultra') && effort === 'ultra') onEffortChange?.('max');
-                              // o8 auto tier (Q ruling 2026-07-12): founders land on
-                              // High, free lands on Low — the server enforces the
-                              // same gate regardless.
+                              // o8 High only when the member's own Google key is present.
                               if (option.backend === 'o8') {
-                                onEffortChange?.(isFreePlan ? 'low' : 'high');
+                                onEffortChange?.(hasOwnGoogleKey ? 'high' : 'low');
                               }
                               setOpen(false);
                             }}
