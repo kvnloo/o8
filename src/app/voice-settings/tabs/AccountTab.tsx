@@ -7,10 +7,18 @@
  * the main app's Plan & Billing — this is the voice-window summary.
  */
 import { useEffect, useState } from 'react';
+import { isPaidPlan } from '@/lib/entitlement/flags';
+import type { Plan as EntitlementPlan } from '@/lib/entitlement/types';
 import { ICONS, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, ACCENT_LIGHT, OK_GREEN, SECTION_BG, SECTION_BORDER } from '../tokens';
 import { SectionCard, SectionTitle, ControlRow, GhostButton, AccentButton, PageHeader } from '../primitives';
 
-type Plan = 'free' | 'pro' | 'team' | null;
+type Plan = EntitlementPlan | null;
+
+function coercePlan(value: string): Plan {
+  return value === 'free' || value === 'pro' || value === 'team' || value === 'founder'
+    ? value
+    : null;
+}
 
 export default function AccountTab() {
   const [plan, setPlan] = useState<Plan>(null);
@@ -19,12 +27,15 @@ export default function AccountTab() {
   useEffect(() => {
     fetch('/api/panel/entitlement', { credentials: 'same-origin' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d && typeof d.plan === 'string') setPlan(d.plan as Plan); })
+      .then((d) => {
+        if (d && typeof d.plan === 'string') setPlan(coercePlan(d.plan));
+      })
       .catch(() => { /* noop */ });
     import('@tauri-apps/api/app').then((m) => m.getVersion()).then(setVersion).catch(() => { /* noop */ });
   }, []);
 
-  const isPro = plan === 'pro' || plan === 'team';
+  // Shared paid predicate includes founder — never treat lifetime-paid as free.
+  const isPro = plan !== null && isPaidPlan(plan);
   const planLabel = plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : '—';
 
   return (
