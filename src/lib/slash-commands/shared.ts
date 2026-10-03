@@ -95,19 +95,90 @@ export function autocompleteOrchestratorSlashCommand(value: string) {
   return getOrchestratorSlashCommandSuggestions(value)[0] ?? null;
 }
 
-export function excerptTranscriptEntries(entries: MobileTranscriptEntry[], maxEntries = 6, maxChars = 2400) {
+export type ExcerptTranscriptOptions = {
+  /** Prefer newest turns when the character budget is exhausted (#2959). */
+  preferNewest?: boolean;
+  /** Keep the ending of a long turn (head+tail) instead of only the opening (#2959). */
+  preserveTurnEnding?: boolean;
+};
+
+// Slash excerpts are much smaller than compaction budgets, so scale the
+// head/tail clip down from the #2958 compaction helper.
+const SLASH_EXCERPT_TURN_HEAD_CHARS = 200;
+const SLASH_EXCERPT_TURN_TAIL_CHARS = 500;
+
+function clipSlashExcerptTurn(text: string, maxChars: number) {
+  if (text.length <= maxChars) return text;
+  if (maxChars <= 1) return '…';
+  const headBudget = Math.min(SLASH_EXCERPT_TURN_HEAD_CHARS, Math.max(20, Math.floor(maxChars * 0.25)));
+  const markerFor = (omitted: number) => `\n[... ${omitted} characters omitted ...]\n`;
+  const probeMarker = markerFor(Math.max(0, text.length - headBudget - SLASH_EXCERPT_TURN_TAIL_CHARS));
+  const preferredTail = Math.min(SLASH_EXCERPT_TURN_TAIL_CHARS, Math.max(40, maxChars - headBudget - probeMarker.length));
+  const tailBudget = Math.min(preferredTail, maxChars - headBudget - probeMarker.length);
+  if (tailBudget < 40) {
+    return `…${text.slice(-(maxChars - 1))}`;
+  }
+  const omitted = text.length - headBudget - tailBudget;
+  const marker = markerFor(omitted);
+  return `${text.slice(0, headBudget)}${marker}${text.slice(-tailBudget)}`;
+}
+
+function formatExcerptLine(
+  entry: MobileTranscriptEntry,
+  remaining: number,
+  preserveTurnEnding: boolean,
+) {
+  const role = entry.type === 'compaction' ? 'COMPACTION' : entry.role.toUpperCase();
+  const text = entryText(entry);
+  if (!text) return null;
+  const prefix = `${role}: `;
+  const bodyBudget = Math.max(0, remaining - prefix.length);
+  if (preserveTurnEnding) {
+    return `${prefix}${clipSlashExcerptTurn(text, bodyBudget)}`;
+  }
+  if (prefix.length + text.length > remaining) {
+    return `${prefix}${text.slice(0, Math.max(0, bodyBudget - 1)).trimEnd()}…`;
+  }
+  return `${prefix}${text}`;
+}
+
+export function excerptTranscriptEntries(
+  entries: MobileTranscriptEntry[],
+  maxEntries = 6,
+  maxChars = 2400,
+  options?: ExcerptTranscriptOptions,
+) {
+  const preferNewest = options?.preferNewest === true;
+  const preserveTurnEnding = options?.preserveTurnEnding === true;
+  const window = entries.slice(0, maxEntries);
   let remaining = maxChars;
   const chunks: string[] = [];
-  for (const entry of entries.slice(0, maxEntries)) {
-    const role = entry.type === 'compaction' ? 'COMPACTION' : entry.role.toUpperCase();
-    const text = entryText(entry);
-    if (!text) continue;
-    const line = `${role}: ${text}`;
+
+  if (!preferNewest) {
+    for (const entry of window) {
+      const line = formatExcerptLine(entry, remaining, preserveTurnEnding);
+      if (!line) continue;
+      if (line.length > remaining) {
+        // formatExcerptLine already clipped to remaining; keep the clipped form.
+        chunks.push(line.slice(0, remaining));
+        break;
+      }
+      chunks.push(line);
+      remaining -= line.length + 1;
+      if (remaining <= 0) break;
+    }
+    return chunks.join('\n');
+  }
+
+  // Newest-first fill, then restore chronological order among the kept turns.
+  for (let index = window.length - 1; index >= 0; index -= 1) {
+    const line = formatExcerptLine(window[index]!, remaining, preserveTurnEnding);
+    if (!line) continue;
     if (line.length > remaining) {
-      chunks.push(`${line.slice(0, Math.max(0, remaining - 1)).trimEnd()}…`);
+      chunks.unshift(line.slice(0, remaining));
       break;
     }
-    chunks.push(line);
+    chunks.unshift(line);
     remaining -= line.length + 1;
     if (remaining <= 0) break;
   }
