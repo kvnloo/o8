@@ -27,8 +27,8 @@ function makeAlert(overrides: Partial<Alert> = {}): Alert {
   };
 }
 
-function actionButton(container: HTMLElement): HTMLButtonElement | null {
-  return container.querySelector('button[aria-label="Review"]');
+function actionButton(container: HTMLElement, label: string): HTMLButtonElement | null {
+  return container.querySelector(`button[aria-label="${label}"]`);
 }
 
 function dismissButton(container: HTMLElement): HTMLButtonElement | null {
@@ -69,7 +69,7 @@ describe('AlertToast keyboard-reachable action', () => {
       alerts: [makeAlert()],
     })));
 
-    const action = actionButton(container);
+    const action = actionButton(container, 'Review: Approval needed');
     const dismiss = dismissButton(container);
     expect(action).not.toBeNull();
     expect(dismiss).not.toBeNull();
@@ -94,7 +94,7 @@ describe('AlertToast keyboard-reachable action', () => {
       onAction,
     })));
 
-    const action = actionButton(container)!;
+    const action = actionButton(container, 'Review: Approval needed')!;
     act(() => action.click());
     expect(onAction).toHaveBeenCalledOnce();
     expect(onAction).toHaveBeenCalledWith(alert);
@@ -119,7 +119,47 @@ describe('AlertToast keyboard-reachable action', () => {
     act(() => {
       vi.advanceTimersByTime(300);
     });
-    expect(actionButton(container)).toBeNull();
+    expect(actionButton(container, 'Review: Approval needed')).toBeNull();
     expect(dismissButton(container)).toBeNull();
+  });
+
+  it('includes the alert title in the action accessible name and describes detail', () => {
+    // Invariant: alert_toast_action_name_includes_title
+    // With actionLabel → "Review: <title>"; without → title alone; detail via aria-describedby.
+    const withLabel = makeAlert({
+      id: 'with-label',
+      title: 'Agent One needs approval',
+      actionLabel: 'Review',
+      detail: 'Shell command pending',
+    });
+    const withoutLabel = makeAlert({
+      id: 'no-label',
+      title: 'Context critically full',
+      actionLabel: undefined,
+      detail: 'Trim history or raise the budget',
+      type: 'context-critical',
+    });
+
+    act(() => root.render(createElement(AlertToast, {
+      alerts: [withLabel, withoutLabel],
+    })));
+
+    const labeled = actionButton(container, 'Review: Agent One needs approval');
+    const titled = actionButton(container, 'Context critically full');
+    expect(labeled).not.toBeNull();
+    expect(titled).not.toBeNull();
+    // Verb-only name must not remain.
+    expect(actionButton(container, 'Review')).toBeNull();
+
+    const labeledDetailId = labeled!.getAttribute('aria-describedby');
+    const titledDetailId = titled!.getAttribute('aria-describedby');
+    expect(labeledDetailId).toBe('alert-toast-detail-with-label');
+    expect(titledDetailId).toBe('alert-toast-detail-no-label');
+    expect(container.querySelector(`#${labeledDetailId}`)?.textContent).toBe(
+      'Shell command pending',
+    );
+    expect(container.querySelector(`#${titledDetailId}`)?.textContent).toBe(
+      'Trim history or raise the budget',
+    );
   });
 });
