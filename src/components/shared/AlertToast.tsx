@@ -125,6 +125,10 @@ export const AlertToast = memo(function AlertToast({
       {toasts.map(({ alert, exiting }) => {
         const Icon = ICON_MAP[alert.type] ?? AlertTriangle;
         const accent = ACCENT_BY_TYPE[alert.type] ?? 'var(--t-accent, #2563eb)';
+        const detailId = `alert-toast-detail-${alert.id}`;
+        const actionName = alert.actionLabel
+          ? `${alert.actionLabel}: ${alert.title}`
+          : alert.title;
 
         return (
           <div
@@ -160,7 +164,8 @@ export const AlertToast = memo(function AlertToast({
                 keyboard users can focus/activate with Enter or Space. */}
             <button
               type="button"
-              aria-label={alert.actionLabel ?? alert.title}
+              aria-label={actionName}
+              aria-describedby={detailId}
               onClick={() => {
                 if (exiting) return;
                 if (onAction) onAction(alert);
@@ -197,6 +202,7 @@ export const AlertToast = memo(function AlertToast({
                   {alert.title}
                 </div>
                 <div
+                  id={detailId}
                   style={{
                     // Hurttlocker meta: 9.5/260/-0.4 (was 12/normal).
                     fontSize: 9.5,
