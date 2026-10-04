@@ -61,7 +61,8 @@ function normalizeKey(key: string): string {
 }
 
 function boundedJson(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
-  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value === 'string') return value.length <= 2_048 ? value : value.slice(0, 2_048) + '…';
   if (typeof value === 'bigint') return value.toString();
   if (typeof value !== 'object') return null;
@@ -133,8 +134,8 @@ export function buildZ0ShadowRequest(
     },
     capability: {
       function: 'o8.typed_judgment.shadow_route',
-      task: 'Shadow-route o8 typed judgment: '
-        + Object.entries(input.questions).map(([id, question]) => id + ':' + question.type).join(', '),
+      task: ('Shadow-route o8 typed judgment: '
+        + Object.entries(input.questions).map(([id, question]) => id + ':' + question.type).join(', ')).slice(0, 16_000),
       state,
       experimental: true,
       automatic: false,
