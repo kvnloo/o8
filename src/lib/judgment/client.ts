@@ -13,6 +13,7 @@
 import { performance } from 'node:perf_hooks';
 
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { scheduleZ0BendJudgmentShadow } from '@/lib/z0-bend/shadow';
 import { recordJudgmentReceipt } from './receipts';
 import { resolveDirectJudgmentRoute, resolveJudgmentRoute, resolveManagedJudgmentRoute, TYPESAFE_SYSTEMONE_URL, type ResolvedJudgmentRoute } from './route';
 import {
@@ -274,6 +275,22 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
             attempts: attemptNumber,
             error: null,
           });
+          if (receiptId) {
+            scheduleZ0BendJudgmentShadow({
+              receiptId,
+              state: request.state,
+              questions: request.questions,
+              context,
+              incumbent: {
+                answers: parsed.answers as Record<string, unknown>,
+                model: parsed.model,
+                route,
+                latencyMs,
+                inputTokens: parsed.usage.inputTokens,
+                outputTokens: parsed.usage.outputTokens,
+              },
+            });
+          }
           return { ...parsed, latencyMs, attempts: attemptNumber, receiptId };
         }
         if (!outcome.retryable || attemptNumber === maxAttempts) {
