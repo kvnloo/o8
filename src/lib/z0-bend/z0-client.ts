@@ -84,10 +84,11 @@ function runBoundedProcess(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let timer: NodeJS.Timeout | null = null;
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       if (error) reject(error);
       else resolve({ stdout, stderr });
     };
@@ -110,7 +111,7 @@ function runBoundedProcess(
         finish();
       }
     });
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       child.kill('SIGKILL');
       finish(new Error('z0 bridge timed out'));
     }, options.timeoutMs);
