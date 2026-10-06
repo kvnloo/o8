@@ -67,7 +67,7 @@ function exec(file: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ s
 }
 
 async function gpuSmoke(bin: string) {
-  const env = { ...process.env, BEND_NO_TELEMETRY: '1' };
+  const env: NodeJS.ProcessEnv = { ...process.env, BEND_NO_TELEMETRY: '1' };
   delete env.BENDTT;
   delete env.BEND_ORIGIN;
   const root = process.cwd();
