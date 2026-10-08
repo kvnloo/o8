@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -197,4 +198,31 @@ describe('runLaneRebaseLint', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.skipped).toContain('timeout');
   });
+
+  it('prevents host writes from a packet-controlled ESLint config (#3414)', async () => {
+    const repo = initLintRepo('untrusted-config');
+    const outside = `${repo}-outside-lint-marker`;
+    writeFileSync(path.join(repo, 'src', 'packet.js'), 'export const value = 1;\n');
+    commitAll(repo, 'base');
+    git(repo, ['checkout', '-b', 'packet/host-verify']);
+    writeFileSync(path.join(repo, 'eslint.config.mjs'), [
+      "import { writeFileSync } from 'node:fs';",
+      `writeFileSync(${JSON.stringify(outside)}, 'executed');`,
+      "export default [{ files: ['**/*.js'], rules: {} }];",
+      '',
+    ].join('\n'));
+    writeFileSync(path.join(repo, 'src', 'packet.js'), 'export const value = 2;\n');
+    commitAll(repo, 'worker updates lint config');
+
+    try {
+      const result = await runLaneRebaseLint({
+        cwd: repo, baseRef: 'main', actualBranch: 'packet/host-verify', logPrefix: 'test',
+      });
+      // Worker code may be inspected, but must not mutate host paths outside the lane.
+      expect(existsSync(outside)).toBe(false);
+      expect(result.ok).toBe(false);
+    } finally {
+      rmSync(outside, { force: true });
+    }
+  }, 30_000);
 });
