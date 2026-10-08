@@ -16,8 +16,10 @@ function quote(arg: string): string {
   return "'" + arg.replaceAll("'", "'\"'\"'") + "'";
 }
 
-function failure(message: string, stdout = '', code: number | string = 'VERIFICATION_CONFINEMENT_REQUIRED') {
-  return Object.assign(new Error(message), { stdout: stdout || message, stderr: '', code });
+function failure(message: string, stdout = '', stderr = '', code: number | string = 'VERIFICATION_CONFINEMENT_REQUIRED') {
+  // Preserve child channels. Infrastructure failures with no output still need
+  // a diagnostic so callers cannot mistake a refusal for a skipped compiler.
+  return Object.assign(new Error(message), { stdout, stderr: stderr || (stdout ? '' : message), code });
 }
 
 /** execFile-compatible result, with actual exit/status from trusted native supervision. */
@@ -42,12 +44,12 @@ export async function confinedVerificationExecFile(
       maxOutputBytes,
     });
     if (result.stopped !== null) {
-      throw failure(`Confined lane verification stopped: ${result.stopped}`, result.output);
+      throw failure(`Confined lane verification stopped: ${result.stopped}`, result.stdout, result.stderr);
     }
     if (result.code !== 0) {
-      throw failure(`Confined lane verification exited ${result.code ?? 'unknown'}`, result.output, result.code ?? 'UNKNOWN');
+      throw failure(`Confined lane verification exited ${result.code ?? 'unknown'}`, result.stdout, result.stderr, result.code ?? 'UNKNOWN');
     }
-    return { stdout: result.output, stderr: '' };
+    return { stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
     if (error instanceof Error && 'stdout' in error) throw error;
     throw failure(`Refused unconfined lane verification (#3414): ${error instanceof Error ? error.message : String(error)}`);

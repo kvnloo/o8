@@ -211,6 +211,9 @@ function drained(stream: NodeJS.ReadableStream | null | undefined): Promise<void
 export interface PiCommandStructuredResult {
   code: number | null;
   output: string;
+  /** Separate channels for machine-readable consumers; output remains the combined transcript. */
+  stdout: string;
+  stderr: string;
   stopped: 'timeout' | 'output' | 'stop' | null;
 }
 
@@ -277,6 +280,8 @@ async function runCommand(root: string, command: string, abort: AbortSignal, opt
   let teardown: Promise<boolean> | undefined;
   const endTree = () => (teardown ??= SUPERVISED ? endSupervised() : tree ? endCommandTree(tree) : Promise.resolve(true));
   const chunks: Buffer[] = [];
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
   let size = 0;
   let stopped: 'timeout' | 'output' | 'stop' | undefined;
   let stopRequested!: () => void;
@@ -287,16 +292,20 @@ async function runCommand(root: string, command: string, abort: AbortSignal, opt
     stopRequested();
     void endTree();
   };
-  const take = (chunk: Buffer) => {
+  const take = (chunk: Buffer, stream: Buffer[]) => {
     if (!chunk.length) return;
     const room = maxOutputBytes - size;
     if (room <= 0) { stop('output'); return; }
-    chunks.push(chunk.subarray(0, room));
+    const retained = chunk.subarray(0, room);
+    chunks.push(retained);
+    // Keep the existing shared byte cap; retaining channel identity adds no
+    // second allowance and does not splice stderr into machine-readable stdout.
+    if (options.structuredResult) stream.push(retained);
     size += Math.min(room, chunk.length);
     if (chunk.length > room) stop('output');
   };
-  child.stdout?.on('data', take);
-  child.stderr?.on('data', take);
+  child.stdout?.on('data', (chunk: Buffer) => take(chunk, stdoutChunks));
+  child.stderr?.on('data', (chunk: Buffer) => take(chunk, stderrChunks));
   const timer = setTimeout(() => stop('timeout'), timeoutMs);
   // Track the tree while it runs, so a child that starts its own group is still
   // known after its parent exits and it is reparented.
@@ -328,7 +337,11 @@ async function runCommand(root: string, command: string, abort: AbortSignal, opt
       : stopped === 'output'
         ? `The command produced more than ${maxOutputBytes} bytes of output and was stopped.`
         : `Exit code ${result.code ?? 'unknown'}`;
-    if (options.structuredResult) return { code: result.code, output, stopped: stopped ?? null };
+    if (options.structuredResult) return {
+      code: result.code, output, stopped: stopped ?? null,
+      stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf8'),
+    };
     return `$ ${command}\n${status}\n\n${output || '(no output)'}`;
   } finally {
     clearTimeout(timer);

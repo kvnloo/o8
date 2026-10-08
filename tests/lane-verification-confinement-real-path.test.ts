@@ -10,6 +10,7 @@ import { confinedVerificationExecFile } from '@/lib/lane/confined-verification-e
 import { runLaneRebaseLint } from '@/lib/lane/rebase-lint';
 import { runLaneRebaseTests } from '@/lib/lane/rebase-tests';
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
+import { runPiCommand } from '@/lib/pi/sdk/command';
 
 // These tests execute the actual runner + native OS supervisor. They do NOT
 // mock the security boundary. The CI runner must build o8-pi-write first.
@@ -159,5 +160,73 @@ describe('lane verification native confinement (#3414)', () => {
     expect(existsSync(path.join(lane, 'tsc-started'))).toBe(true);
     expect(existsSync(outside)).toBe(false);
     expect(result.ok).toBe(false);
+  }, 30_000);
+});
+
+// The same real native process boundary must preserve machine-readable stdout
+// even when the CLI writes diagnostics to stderr. Keep the shared output cap.
+describe('confined verification stream contract (#3414)', () => {
+  it('keeps JSON stdout separate from diagnostic stderr on success', async () => {
+    const { lane } = fixture('json-streams');
+    const result = await confinedVerificationExecFile(process.execPath, [
+      '-e', "process.stdout.write('[]');process.stderr.write('warning\n');",
+    ], { cwd: lane, timeout: 15_000 });
+    expect(result).toEqual({ stdout: '[]', stderr: 'warning\n' });
+  }, 30_000);
+
+  it('preserves exit 1 JSON and diagnostics without merging the streams', async () => {
+    const { lane } = fixture('exit-one-streams');
+    await expect(confinedVerificationExecFile(process.execPath, [
+      '-e', "process.stdout.write('[]');process.stderr.write('too many warnings\n');process.exitCode=1;",
+    ], { cwd: lane, timeout: 15_000 })).rejects.toMatchObject({
+      code: 1, stdout: '[]', stderr: 'too many warnings\n',
+    });
+  }, 30_000);
+
+  it('keeps a stderr-only failure off stdout', async () => {
+    const { lane } = fixture('stderr-only');
+    await expect(confinedVerificationExecFile(process.execPath, [
+      '-e', "process.stderr.write('bad config\n');process.exitCode=2;",
+    ], { cwd: lane, timeout: 15_000 })).rejects.toMatchObject({
+      code: 2, stdout: '', stderr: 'bad config\n',
+    });
+  }, 30_000);
+
+  it('decodes split UTF-8 in its own stream despite interleaved diagnostics', async () => {
+    const { lane } = fixture('utf8-streams');
+    const result = await confinedVerificationExecFile(process.execPath, [
+      '-e', "const b=Buffer.from('✓');process.stdout.write(b.subarray(0,1));setTimeout(()=>{process.stderr.write('diagnostic');setTimeout(()=>process.stdout.write(b.subarray(1)),20)},20);",
+    ], { cwd: lane, timeout: 15_000 });
+    expect(result).toEqual({ stdout: '✓', stderr: 'diagnostic' });
+  }, 30_000);
+
+  it('retains both streams in the existing text result', async () => {
+    const { lane } = fixture('text-compat');
+    const result = await runPiCommand(lane, 'printf stream-out; printf stream-err >&2',
+      AbortSignal.timeout(15_000), { confined: true });
+    expect(typeof result).toBe('string');
+    expect(result).toContain('Exit code 0');
+    expect(result).toContain('stream-out');
+    expect(result).toContain('stream-err');
+  }, 30_000);
+
+  it('shares a single byte allowance across stdout and stderr', async () => {
+    const { lane } = fixture('shared-cap');
+    const result = await runPiCommand(lane, "printf '%0800d' 0; printf '%0800d' 0 >&2; sleep 2",
+      AbortSignal.timeout(15_000), { confined: true, structuredResult: true, maxOutputBytes: 1000 });
+    expect(result.stopped).toBe('output');
+    expect(Buffer.byteLength(result.output)).toBe(1000);
+    expect(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr)).toBe(1000);
+  }, 30_000);
+
+  it('allows unchanged warnings through confined head and baseline lint', async () => {
+    const { lane } = fixture('baseline-warning-control');
+    lintRepo(lane, "export default [{files:['**/*.js'],rules:{'no-console':'warn'}}];\n");
+    writeFileSync(path.join(lane, 'src', 'packet.js'), 'console.log("head");\n');
+    commitAll(lane, 'same warning in changed file');
+    const result = await runLaneRebaseLint({
+      cwd: lane, baseRef: 'main', actualBranch: 'packet/3414', logPrefix: '3414',
+    });
+    expect(result).toEqual({ ok: true });
   }, 30_000);
 });
