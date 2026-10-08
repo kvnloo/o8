@@ -1,0 +1,34 @@
+name: Confined lane verification downstream
+on:
+  pull_request:
+    branches: [integration/o8-3414-confined-base-20261008]
+permissions:
+  contents: read
+concurrency:
+  group: confined-verification-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-security:
+    if: github.repository == 'kvnloo/o8'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11
+      - run: npm ci --prefer-offline
+      - name: Build existing governed Pi native supervisor
+        run: cargo build --manifest-path src-tauri/sidecars/pi-write/Cargo.toml --release
+      - name: Real-path no-host-write acceptance
+        env:
+          O8_PI_WRITE_BIN: ${{ github.workspace }}/src-tauri/sidecars/pi-write/target/release/o8-pi-write
+        run: npm run test:integration -- tests/lane-verification-confinement-real-path.test.ts
+      - name: Test classification
+        run: npm run test:classification:check
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Existing hermetic completion
+        run: npm test
