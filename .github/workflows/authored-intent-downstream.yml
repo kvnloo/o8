@@ -34,6 +34,18 @@ jobs:
         run: npm run test:classification:check
       - name: Focused persisted-route tests
         run: npx vitest run src/app/api/orchestrator/intent-contract/route.test.ts
+      - name: Checkout pinned AODL canonical consumer
+        uses: actions/checkout@v4
+        with:
+          repository: kvnloo/aodl
+          ref: ba9190a6dadcc5ca747c7766b3b53bfc246ce53e
+          path: .test-deps/aodl
+          persist-credentials: false
+      - name: Real AODL subprocess through o8 persisted route
+        env:
+          O8_AODL_SOURCE_DIR: ${{ github.workspace }}/.test-deps/aodl
+        run: |
+          O8_AODL_PYTHON="$(command -v python3)" npx vitest run tests/aodl-consumer-real-path.test.ts
       - name: Type check
         run: npx tsc --noEmit
       - name: Touched lint
