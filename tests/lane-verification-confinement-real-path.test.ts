@@ -61,6 +61,31 @@ describe('lane verification native confinement (#3414)', () => {
     expect(existsSync(path.join(lane, 'inside.txt'))).toBe(true);
   }, 30_000);
 
+  it('refuses to run a command when the installed confinement helper is missing', async () => {
+    const { lane, outside } = fixture('missing-helper');
+    const before = process.env.O8_PI_WRITE_BIN;
+    process.env.O8_PI_WRITE_BIN = path.join(lane, 'not-an-executable');
+    try {
+      await expect(confinedVerificationExecFile(process.execPath, [
+        '-e', `require('node:fs').writeFileSync(${JSON.stringify(outside)}, 'escaped')`,
+      ], { cwd: lane, timeout: 5_000 })).rejects.toThrow(/Refused unconfined lane verification/);
+      expect(existsSync(outside)).toBe(false);
+    } finally {
+      if (before === undefined) delete process.env.O8_PI_WRITE_BIN;
+      else process.env.O8_PI_WRITE_BIN = before;
+    }
+  }, 15_000);
+
+  it('rejects symlink escapes from inside the permitted lane', async () => {
+    const { lane, outside } = fixture('symlink');
+    symlinkSync(path.dirname(lane), path.join(lane, 'escape'), 'dir');
+    await expect(confinedVerificationExecFile(process.execPath, [
+      '-e', "require('node:fs').writeFileSync('started','yes');require('node:fs').writeFileSync('escape/outside-marker','escaped')",
+    ], { cwd: lane, timeout: 15_000 })).rejects.toThrow();
+    expect(existsSync(path.join(lane, 'started'))).toBe(true);
+    expect(existsSync(outside)).toBe(false);
+  }, 30_000);
+
   it('blocks an attempted host write from the npm test script', async () => {
     const { lane, outside } = fixture('npm');
     writeFileSync(path.join(lane, 'package.json'), JSON.stringify({
