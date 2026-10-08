@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -58,4 +58,20 @@ describe('runLaneRebaseTests', () => {
     const result = await runLaneRebaseTests({ ...base, cwd });
     expect(result).toEqual({ ok: true, skipped: true });
   });
+
+  it('prevents host writes from a packet-controlled npm test script (#3414)', async () => {
+    const cwd = scaffold('exit 0');
+    const outside = `${cwd}-outside-test-marker`;
+    writeFileSync(join(cwd, 'package.json'), JSON.stringify({
+      name: 'fixture',
+      scripts: { test: `node -e "require('node:fs').writeFileSync('${outside}', 'executed')"` },
+    }));
+    try {
+      const result = await runLaneRebaseTests({ ...base, cwd });
+      expect(existsSync(outside)).toBe(false);
+      expect(result.ok).toBe(false);
+    } finally {
+      rmSync(outside, { force: true });
+    }
+  }, 30_000);
 });
