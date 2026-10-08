@@ -13,7 +13,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { laneGit } from '@/lib/lane/lane-git';
-import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
+import { confinedVerificationExecFile } from './confined-verification-exec';
 
 const execFileAsync = promisify(execFile);
 
@@ -220,7 +220,7 @@ async function lintSnapshot(input: {
     ...input.files,
   ];
   try {
-    const { stdout, stderr } = await materializationAwareExecFile(process.execPath, args, {
+    const { stdout, stderr } = await confinedVerificationExecFile(process.execPath, args, {
       windowsHide: true,
       cwd: input.cwd,
       timeout: remainingTimeout(input.deadline),

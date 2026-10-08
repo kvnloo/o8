@@ -2,9 +2,9 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
-import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
+import { confinedVerificationExecFile } from './confined-verification-exec';
 
-const execFileAsync = materializationAwareExecFile;
+const execFileAsync = confinedVerificationExecFile;
 
 const TEST_TIMEOUT_MS = 300_000;
 const TEST_MAX_BUFFER_BYTES = 8 * 1024 * 1024;

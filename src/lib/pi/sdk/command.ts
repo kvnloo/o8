@@ -160,6 +160,8 @@ async function endCommandTree(tree: CommandTree): Promise<boolean> {
 
 export interface PiCommandOptions {
   timeoutMs?: number; maxOutputBytes?: number;
+  /** Host-only structured result for confined verification. Existing tool output stays text. */
+  structuredResult?: boolean;
   /** Lane rules (#3385): no network, and writes only in the workspace and a private temp dir. Host-set only. */
   confined?: boolean;
 }
@@ -206,6 +208,20 @@ function drained(stream: NodeJS.ReadableStream | null | undefined): Promise<void
  * removed afterwards. When confinement cannot be applied it throws
  * `PiConfinementUnavailable` and nothing has started.
  */
+export interface PiCommandStructuredResult {
+  code: number | null;
+  output: string;
+  stopped: 'timeout' | 'output' | 'stop' | null;
+}
+
+export function runPiCommand(
+  root: string, command: string, abort: AbortSignal,
+  options: PiCommandOptions & { structuredResult: true },
+): Promise<PiCommandStructuredResult>;
+export function runPiCommand(
+  root: string, command: string, abort: AbortSignal,
+  options?: PiCommandOptions,
+): Promise<string>;
 export async function runPiCommand(root: string, command: string, abort: AbortSignal, options: PiCommandOptions = {}) {
   if (!options.confined) return runCommand(root, command, abort, options);
   abort.throwIfAborted();
@@ -312,6 +328,7 @@ async function runCommand(root: string, command: string, abort: AbortSignal, opt
       : stopped === 'output'
         ? `The command produced more than ${maxOutputBytes} bytes of output and was stopped.`
         : `Exit code ${result.code ?? 'unknown'}`;
+    if (options.structuredResult) return { code: result.code, output, stopped: stopped ?? null };
     return `$ ${command}\n${status}\n\n${output || '(no output)'}`;
   } finally {
     clearTimeout(timer);

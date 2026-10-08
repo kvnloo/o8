@@ -10,7 +10,14 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// These tests isolate warning-diff semantics. The resource integration lane
+// separately uses the real native confined subprocess, not this mock.
+vi.mock('./confined-verification-exec', async () => {
+  const { materializationAwareExecFile } = await import('@/lib/worktree/materialization-execution');
+  return { confinedVerificationExecFile: materializationAwareExecFile };
+});
 
 import { runLaneRebaseLint } from './rebase-lint';
 
