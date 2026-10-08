@@ -202,7 +202,7 @@ describe('runLaneRebaseLint', () => {
   it('prevents host writes from a packet-controlled ESLint config (#3414)', async () => {
     const repo = initLintRepo('untrusted-config');
     const outside = `${repo}-outside-lint-marker`;
-    writeFileSync(path.join(repo, 'src', 'packet.js'), 'export const value = 1;\\n');
+    writeFileSync(path.join(repo, 'src', 'packet.js'), 'export const value = 1;\n');
     commitAll(repo, 'base');
     git(repo, ['checkout', '-b', 'packet/host-verify']);
     writeFileSync(path.join(repo, 'eslint.config.mjs'), [
@@ -210,8 +210,8 @@ describe('runLaneRebaseLint', () => {
       `writeFileSync(${JSON.stringify(outside)}, 'executed');`,
       "export default [{ files: ['**/*.js'], rules: {} }];",
       '',
-    ].join('\\n'));
-    writeFileSync(path.join(repo, 'src', 'packet.js'), 'export const value = 2;\\n');
+    ].join('\n'));
+    writeFileSync(path.join(repo, 'src', 'packet.js'), 'export const value = 2;\n');
     commitAll(repo, 'worker updates lint config');
 
     try {
