@@ -3,6 +3,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,9 +17,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // separately uses the real native confined subprocess, not this mock.
 vi.mock('./confined-verification-exec', async () => {
   const { materializationAwareExecFile } = await import('@/lib/worktree/materialization-execution');
-  return { confinedVerificationExecFile: materializationAwareExecFile };
+  return { confinedVerificationExecFile: vi.fn(materializationAwareExecFile) };
 });
 
+import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
+import { confinedVerificationExecFile } from './confined-verification-exec';
 import { runLaneRebaseLint } from './rebase-lint';
 
 const tempDirs: string[] = [];
@@ -74,6 +77,8 @@ function initLintRepo(label: string): string {
 }
 
 afterEach(() => {
+  vi.mocked(confinedVerificationExecFile).mockReset();
+  vi.mocked(confinedVerificationExecFile).mockImplementation(materializationAwareExecFile);
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -204,4 +209,83 @@ describe('runLaneRebaseLint', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.skipped).toContain('timeout');
   });
+});
+
+interface ExitCase {
+  name: string;
+  headCode?: number;
+  baseCode?: number;
+  headKind?: 'warning' | 'error' | 'empty';
+  baseKind?: 'warning' | 'empty';
+  injected?: string;
+  baselineOnly?: boolean;
+  baseline?: boolean;
+  expected: boolean;
+}
+
+const exitCases: ExitCase[] = [
+  { name: 'head exit 2 cannot become pass', headCode: 2, expected: false },
+  { name: 'head exit 125 cannot become pass', headCode: 125, expected: false },
+  { name: 'confined output stop cannot become pass', injected: 'VERIFICATION_CONFINEMENT_REQUIRED', expected: false },
+  { name: 'unknown supervisor status cannot become pass', injected: 'UNKNOWN', expected: false },
+  { name: 'baseline exit 2 cannot become pass', headCode: 1, headKind: 'warning', baseCode: 2, baseKind: 'warning', expected: false, baseline: true },
+  { name: 'baseline confinement refusal cannot become pass', injected: 'VERIFICATION_CONFINEMENT_REQUIRED', baselineOnly: true, headKind: 'warning', baseKind: 'warning', expected: false, baseline: true },
+  { name: 'clean exit 0 remains pass', expected: true },
+  { name: 'exit 1 lint error remains fail', headCode: 1, headKind: 'error', expected: false },
+  { name: 'exit 1 unchanged warning remains pass', headCode: 1, baseCode: 1, headKind: 'warning', baseKind: 'warning', expected: true, baseline: true },
+  { name: 'exit 1 new warning remains fail', headCode: 1, headKind: 'warning', baseKind: 'empty', expected: false, baseline: true },
+];
+
+// Real Git checkouts and Node CLI fixtures exercise the production lint gate.
+// The existing process-boundary mock also injects supervisor refusal envelopes;
+// these tests do not certify native OS confinement.
+describe('runLaneRebaseLint execution status (#3414)', () => {
+  it.each(exitCases)('$name', async (scenario) => {
+    const repo = makeDir('exit-contract');
+    git(repo, ['init', '-b', 'main']);
+    writePackage(repo);
+    writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n');
+    writeFileSync(path.join(repo, 'eslint.config.mjs'), 'export default [];\n');
+    mkdirSync(path.join(repo, 'src'));
+    const eslint = path.join(repo, 'node_modules', 'eslint');
+    mkdirSync(path.join(eslint, 'bin'), { recursive: true });
+    writeFileSync(path.join(eslint, 'package.json'), JSON.stringify({ name: 'eslint', version: '9.0.0' }));
+    writeFileSync(path.join(eslint, 'bin', 'eslint.js'), [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      `const scenario = ${JSON.stringify(scenario)};`,
+      "const phase = fs.readFileSync('.phase', 'utf8');",
+      "const kind = scenario[phase + 'Kind'] || 'empty';",
+      "const messages = [{ruleId:'fixture',severity:kind==='error'?2:1,message:'fixture diagnostic',line:1}];",
+      "const rows = kind === 'empty' ? [] : [{filePath:path.join(process.cwd(),'src/packet.js'),messages}];",
+      "process.stdout.write(JSON.stringify(rows), () => { process.exitCode = scenario[phase + 'Code'] || 0; });",
+      '',
+    ].join('\n'));
+    writeFileSync(path.join(repo, 'src', 'packet.js'), 'export const value = 1;\n');
+    writeFileSync(path.join(repo, '.phase'), 'base');
+    commitAll(repo, 'base');
+    git(repo, ['checkout', '-b', 'packet/exit-contract']);
+    writeFileSync(path.join(repo, 'src', 'packet.js'), 'export const value = 2;\n');
+    writeFileSync(path.join(repo, '.phase'), 'head');
+    commitAll(repo, 'head');
+
+    const phases: string[] = [];
+    vi.mocked(confinedVerificationExecFile).mockImplementation(async (command, args, options) => {
+      const phase = readFileSync(path.join(options.cwd, '.phase'), 'utf8');
+      phases.push(phase);
+      const reply = await materializationAwareExecFile(command, args, options);
+      if (scenario.injected && (!scenario.baselineOnly || phase === 'base')) {
+        throw Object.assign(new Error('Confined lane verification stopped: output'), {
+          stdout: reply.stdout, stderr: reply.stderr, code: scenario.injected,
+        });
+      }
+      return reply;
+    });
+    const result = await runLaneRebaseLint({
+      cwd: repo, baseRef: 'main', actualBranch: 'packet/exit-contract', logPrefix: 'test',
+    });
+    expect(result.ok).toBe(scenario.expected);
+    if (scenario.baseline) expect(phases).toEqual(['head', 'base']);
+    else expect(phases).toEqual(['head']);
+  }, 20_000);
 });
