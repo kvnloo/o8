@@ -1,8 +1,6 @@
 name: Authored intent downstream verification
 
 on:
-  push:
-    branches: [feat/authored-intent-admission-3185]
   pull_request:
     branches: [integration/o8-upstream-20261003-intent]
 
