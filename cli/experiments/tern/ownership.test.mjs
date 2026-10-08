@@ -85,10 +85,25 @@ async function start(label) {
 async function pending(key) {
   return until(() => approvals.listApprovalsForContext({ sessionKey: key }).find(item => item.status === 'pending'), 'persisted pending approval');
 }
-async function snapshot(f) {
+async function readRecord(f) {
   const sources = await getOwnedPiTelemetrySources(f.key);
   expect(sources.stdoutPaths.length).toBeGreaterThan(0);
-  const record = JSON.parse(await readFile(join(dirname(dirname(sources.stdoutPaths[0])), 'session.json'), 'utf8'));
+  return JSON.parse(await readFile(join(dirname(dirname(sources.stdoutPaths[0])), 'session.json'), 'utf8'));
+}
+async function settled(f) {
+  // The normal transcript reader saves metadata. Wait for the runtime's own
+  // agent_end/get_state writes before invoking it, so the observer test does
+  // not introduce an unrelated competing-writer race during settlement.
+  await until(async () => {
+    const record = await readRecord(f);
+    const sources = await getOwnedPiTelemetrySources(f.key);
+    const log = await rows(sources.stdoutPaths.at(-1));
+    return !record.activeRun && record.piSessionFile
+      && log.some(frame => frame.type === 'o8_permission_gate_resolved');
+  }, 'settled durable session and permission receipt');
+}
+async function snapshot(f) {
+  const record = await readRecord(f);
   const transcript = (await piRuntime.readTranscript(f.key)).map(({ id, role, text }) => ({ id, role, text }));
   return { record, transcript, wire: await rows(f.log), approval: approvals.getApproval(f.approval.id) };
 }
@@ -152,17 +167,13 @@ async function unchanged(f, before) {
 async function decide(f, action) {
   expect(resolveApproval(f.approval.id, action, 'test', 'Explicit o8 test decision')).not.toBeNull();
   await until(async () => (await rows(f.log)).find(row => row.event === 'permission'), 'permission response through o8');
-  await until(async () => (await piRuntime.readTranscript(f.key)).some(entry => entry.text.includes(`${action === 'approve' ? 'approved' : 'denied'}-1`)), 'decision transcript');
-  // get_state is requested by the owning runtime after agent_end, not by the viewer.
-  await until(async () => {
-    const sources = await getOwnedPiTelemetrySources(f.key);
-    const record = JSON.parse(await readFile(join(dirname(dirname(sources.stdoutPaths[0])), 'session.json'), 'utf8'));
-    return !record.activeRun && record.piSessionFile;
-  }, 'settled durable session');
+  await settled(f);
+  expect((await piRuntime.readTranscript(f.key)).some(entry => entry.text.includes(`${action === 'approve' ? 'approved' : 'denied'}-1`))).toBe(true);
 }
 async function stop(f) {
   expect((await piRuntime.interrupt(f.key)).ok).toBe(true);
   await until(() => !alive(f.pid), 'owned interrupt stops its own process');
+  await until(async () => !(await readRecord(f)).rpcPid, 'persisted RPC process retirement');
 }
 
 describe('Tern observer cannot own Pi RPC lifecycle or permissions', () => {
@@ -203,7 +214,8 @@ describe('Tern observer cannot own Pi RPC lifecycle or permissions', () => {
     await unchanged(f, resumed);
     expect(resolveApproval(f.approval.id, 'approve', 'test', 'Explicit second-turn decision')).not.toBeNull();
     await until(async () => (await rows(f.log)).filter(row => row.event === 'permission').length === 2, 'second correlated permission');
-    await until(async () => (await piRuntime.readTranscript(f.key)).some(entry => entry.text.includes('approved-2')), 'second decision transcript');
+    await settled(f);
+    expect((await piRuntime.readTranscript(f.key)).some(entry => entry.text.includes('approved-2'))).toBe(true);
     expect((await rows(f.log)).filter(row => row.event === 'permission').map(row => row.approved)).toEqual([false, true]);
     await stop(f);
   }, 30_000);
