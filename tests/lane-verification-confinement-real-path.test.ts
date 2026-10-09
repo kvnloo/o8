@@ -169,7 +169,7 @@ describe('confined verification stream contract (#3414)', () => {
   it('keeps JSON stdout separate from diagnostic stderr on success', async () => {
     const { lane } = fixture('json-streams');
     const result = await confinedVerificationExecFile(process.execPath, [
-      '-e', "process.stdout.write('[]');process.stderr.write('warning\n');",
+      '-e', "process.stdout.write('[]');process.stderr.write('warning\\n');",
     ], { cwd: lane, timeout: 15_000 });
     expect(result).toEqual({ stdout: '[]', stderr: 'warning\n' });
   }, 30_000);
@@ -177,7 +177,7 @@ describe('confined verification stream contract (#3414)', () => {
   it('preserves exit 1 JSON and diagnostics without merging the streams', async () => {
     const { lane } = fixture('exit-one-streams');
     await expect(confinedVerificationExecFile(process.execPath, [
-      '-e', "process.stdout.write('[]');process.stderr.write('too many warnings\n');process.exitCode=1;",
+      '-e', "process.stdout.write('[]');process.stderr.write('too many warnings\\n');process.exitCode=1;",
     ], { cwd: lane, timeout: 15_000 })).rejects.toMatchObject({
       code: 1, stdout: '[]', stderr: 'too many warnings\n',
     });
@@ -186,7 +186,7 @@ describe('confined verification stream contract (#3414)', () => {
   it('keeps a stderr-only failure off stdout', async () => {
     const { lane } = fixture('stderr-only');
     await expect(confinedVerificationExecFile(process.execPath, [
-      '-e', "process.stderr.write('bad config\n');process.exitCode=2;",
+      '-e', "process.stderr.write('bad config\\n');process.exitCode=2;",
     ], { cwd: lane, timeout: 15_000 })).rejects.toMatchObject({
       code: 2, stdout: '', stderr: 'bad config\n',
     });
