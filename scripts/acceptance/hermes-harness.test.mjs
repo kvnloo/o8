@@ -17,8 +17,8 @@ function sample() {
     add(pid, { method: 'initialize', direction: 'out', reply: true, protocolVersion: 1, agentName: 'hermes', agentVersion: 'qualification-version', resumeAdvertised: true });
     add(pid, { method: resume ? 'session/resume' : 'session/new', direction: 'in', sessionHash: 'session' });
     add(pid, { method: resume ? 'session/resume' : 'session/new', direction: 'out', reply: true, defaultModel: resume ? undefined : 'default' });
-    add(pid, { method: 'session/set_model', direction: 'in', model: pid === 1 ? 'unavailable' : 'chosen', id: 2 });
-    add(pid, { method: 'session/set_model', direction: 'out', reply: true, id: 2, error: pid === 1, currentModel: pid === 1 ? undefined : 'chosen' });
+    add(pid, { method: 'session/set_model', direction: 'in', sessionHash: 'session', model: pid === 1 ? 'unavailable' : 'chosen', id: 2 });
+    add(pid, { method: 'session/set_model', direction: 'out', reply: true, id: 2, sessionHash: 'session', modelEvidence: 'acp-model-state', error: pid === 1, currentModel: pid === 1 ? undefined : 'chosen' });
   };
   const prompt = (pid, id, finish = true) => {
     add(pid, { method: 'session/prompt', direction: 'in', sessionHash: 'session', id });
@@ -45,7 +45,7 @@ for (const [name, mutate] of [
   ['changed normal HOME', (s) => { s.rows.find((r) => r.method === 'observer/spawn').homeHash = 'wrong'; }],
   ['shared Hermes state', (s) => { s.rows.find((r) => r.method === 'observer/spawn').hermesHomeHash = 'home'; }],
   ['default model instead of pin', (s) => { s.facts.model = 'default'; }],
-  ['model changed after pin', (s) => { s.rows.splice(s.rows.findIndex((r) => r.method === 'session/prompt'), 0, { pid: 2, currentModel: 'wrong' }); }],
+  ['model changed after pin', (s) => { s.rows.splice(s.rows.findIndex((r) => r.method === 'session/prompt'), 0, { pid: 2, direction: 'out', sessionHash: 'session', modelEvidence: 'acp-model-state', currentModel: 'wrong' }); }],
   ['fixture identity', (s) => { s.rows.find((r) => r.method === 'initialize').agentVersion = 'fixture-1'; }],
   ['no resume capability', (s) => { s.rows.find((r) => r.method === 'initialize').resumeAdvertised = false; }],
   ['wrong rejection direction', (s) => { s.rows.find((r) => r.error).direction = 'in'; }],
@@ -124,4 +124,45 @@ test('observer subprocess relays actual bytes without logging payload or stderr'
     assert.ok(rows.some((row) => row.method === 'observer/spawn'));
     assert.ok(rows.some((row) => row.method === 'observer/exit'));
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('observer reads correlated Hermes post-switch live-state metadata', () => {
+  const pending = new Map();
+  summarize({ id: 4, method: 'session/set_model', params: { sessionId: 's', modelId: 'requested' } }, 'in', pending);
+  const row = summarize({ id: 4, result: { _meta: { hermes: { activeModelId: 'provider:actual' } } } }, 'out', pending);
+  assert.equal(row.currentModel, 'provider:actual');
+  assert.equal(row.sessionHash, digest('s'));
+  assert.equal(row.modelEvidence, 'hermes-active-model');
+  assert.equal(summarize({ id: 4, result: { _meta: { hermes: { activeModelId: 'provider:actual' } } } }, 'out', pending).currentModel, undefined);
+});
+
+test('observer refuses client echoes, errors and unrecognized model-shaped updates', () => {
+  for (const direction of ['in', 'out']) {
+    const pending = new Map();
+    summarize({ id: 4, method: 'session/set_model', params: { sessionId: 's', modelId: 'requested' } }, 'in', pending);
+    const row = summarize({ id: 4, error: { code: -32602 }, result: { _meta: { hermes: { activeModelId: 'requested' } } } }, direction, pending);
+    assert.equal(row.currentModel, undefined);
+  }
+  const row = summarize({ method: 'session/update', params: { sessionId: 's', update: { sessionUpdate: 'agent_message_chunk', currentModelId: 'requested' } } }, 'out', new Map());
+  assert.equal(row.currentModel, undefined);
+});
+
+for (const [name, mutate] of [
+  ['empty model ACK', (s) => { s.rows.forEach((r) => { if (r.method === 'session/set_model' && r.reply) delete r.currentModel; }); }],
+  ['wrong-session model witness', (s) => { s.rows.find((r) => r.pid === 2 && r.currentModel).sessionHash = 'other'; }],
+  ['client model echo', (s) => { s.rows.find((r) => r.pid === 2 && r.currentModel).direction = 'in'; }],
+  ['delayed older model reply after latest ACK', (s) => {
+    const index = s.rows.findIndex((r) => r.pid === 2 && r.currentModel);
+    s.rows.splice(index, 0,
+      { pid: 2, direction: 'in', method: 'session/set_model', sessionHash: 'session', model: 'chosen', id: 20 },
+      { pid: 2, direction: 'out', method: 'session/set_model', sessionHash: 'session', reply: true, id: 20 });
+  }],
+  ['model witness from before latest pin', (s) => {
+    const index = s.rows.findIndex((r) => r.method === 'session/prompt');
+    s.rows.splice(index, 0,
+      { pid: 2, direction: 'in', method: 'session/set_model', sessionHash: 'session', model: 'chosen', id: 20 },
+      { pid: 2, direction: 'out', method: 'session/set_model', sessionHash: 'session', reply: true, id: 20 });
+  }],
+]) test(`rejects ${name}`, () => {
+  const input = sample(); mutate(input); assert.throws(() => validateWire(input.rows, input.facts));
 });

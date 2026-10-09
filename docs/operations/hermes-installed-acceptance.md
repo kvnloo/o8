@@ -192,3 +192,26 @@ model after selection, or obtain an independently reviewed upstream observation
 of the live session model before prompt dispatch and adapt the evidence reader.
 No protocol-injecting `session/load` probe is hidden in this observer: that would
 introduce its own replay and change the execution path being measured.
+
+### Additive active-model confirmation
+
+The fork-only [Hermes confirmation patch](https://github.com/kvnloo/hermes-agent/tree/fix/acp-confirm-active-model-3388)
+adds `result._meta.hermes.activeModelId` to a successful `session/set_model`
+response. It snapshots the rebuilt live agent's literal `provider:model` before
+releasing the model-change exclusion, not the request or resolver proposal. This
+uses ACP 0.9's existing extension mechanism; it does not claim an unsupported
+standard model-update type or duplicate existing configOptions migration work.
+
+This observer recognizes that server-origin field only on a correlated successful
+model response. It binds the response to the request's session and requires the
+witness to be the latest pin's exact ACK, or an independently reported ACP model
+state update after that ACK. Client echoes, stale earlier replies, wrong sessions,
+errors, and empty ACKs cannot certify selection. Saved evidence without this
+provenance is not grandfathered into PASS; collect a fresh installed run.
+
+Literal live IDs can differ from aliases or named custom-provider picker IDs. The
+strict comparison deliberately reports those differences instead of assuming
+route equivalence. The field describes configured live agent state; it is not
+provider usage, billing, or inference evidence. The patch and tests are qualification
+only until an authorized host actually runs the patched installed binary. Do not
+install it over a user's profile or report fixture execution as installed acceptance.

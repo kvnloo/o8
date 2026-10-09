@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "runId": "c890049f-2880-4f76-a795-f43f66aff898",
+  "observedAt": "2026-10-09T23:47:56.452Z",
+  "commit": "ad2e133b0f042821d6bdc1955e10383cd1cdd055",
+  "sourceClean": true,
+  "mode": "preflight",
+  "installedRuntime": "BLOCKED",
+  "missionAndRippleUi": "BLOCKED",
+  "overall": "BLOCKED",
+  "blockers": [
+    "Installed Hermes binary absent; install/configure it manually on the acceptance host",
+    "Configured Hermes source profile absent; run hermes setup manually",
+    "Set O8_HERMES_ACCEPTANCE_MODEL to an available non-default ACP model ID",
+    "Explicit reviewed non-metered route required: local or subscription",
+    "Operator must authorize bounded scratch prompts and review provider route/tool boundary"
+  ]
+}

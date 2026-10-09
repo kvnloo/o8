@@ -10,10 +10,15 @@ export function validateWire(rows, facts) {
   assert.ok(prompts[0].sessionHash, 'remote session evidence exists');
   for (const prompt of prompts) {
     const before = rows.slice(0, rows.indexOf(prompt)).filter((r) => r.pid === prompt.pid);
-    const pin = before.findLast((r) => r.method === 'session/set_model' && r.direction === 'in');
+    const pin = before.findLast((r) => r.method === 'session/set_model' && r.direction === 'in' && r.sessionHash === prompt.sessionHash);
     assert.equal(pin?.model, facts.model, 'requested pin precedes every prompt');
-    assert.ok(before.some((r) => r.reply && r.method === 'session/set_model' && r.id === pin.id && !r.error), 'pin acknowledged before prompt');
-    assert.equal(before.findLast((r) => r.currentModel)?.currentModel, facts.model, 'latest actual current model must be reported, not just an empty acknowledgement');
+    const afterPin = before.slice(before.indexOf(pin) + 1);
+    const ack = afterPin.find((r) => r.reply && r.direction === 'out' && r.method === 'session/set_model' && r.id === pin.id && r.sessionHash === prompt.sessionHash && !r.error);
+    assert.ok(ack, 'pin acknowledged before prompt');
+    const witness = afterPin.findLast((r) => r.currentModel && r.sessionHash === prompt.sessionHash && r.direction === 'out' && !r.error);
+    assert.ok(witness && ['hermes-active-model', 'acp-model-state'].includes(witness.modelEvidence), 'server-origin model evidence must follow this session pin');
+    assert.ok((witness === ack) || (witness.method === 'session/update' && !witness.reply && afterPin.indexOf(witness) > afterPin.indexOf(ack)), 'model witness must confirm this pin, not a delayed earlier response');
+    assert.equal(witness.currentModel, facts.model, 'latest actual current model must be reported, not just an empty acknowledgement');
   }
   const initial = rows.find((r) => r.pid === prompts[0].pid && r.defaultModel);
   assert.ok(initial?.defaultModel, 'installed ACP must report its default model');

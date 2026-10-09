@@ -10,20 +10,44 @@ import { pathToFileURL } from 'node:url';
 export const digest = (value) => createHash('sha256').update(Buffer.isBuffer(value) ? value : String(value)).digest('hex');
 export function summarize(frame, direction, pending) {
   if (!frame || typeof frame !== 'object') return null;
-  const method = frame.method ?? pending.get(`${direction === 'out' ? 'in' : 'out'}:${frame.id}`);
-  if (frame.method && frame.id !== undefined) pending.set(`${direction}:${frame.id}`, frame.method);
+  const replyKey = `${direction === 'out' ? 'in' : 'out'}:${frame.id}`;
+  const request = !frame.method ? pending.get(replyKey) : undefined;
+  const method = frame.method ?? request?.method;
+  if (!frame.method) pending.delete(replyKey);
+  if (frame.method && frame.id !== undefined) pending.set(`${direction}:${frame.id}`, {
+    method: frame.method, sessionId: frame.params?.sessionId,
+  });
   const result = frame.result ?? {};
   const update = frame.params?.update ?? {};
   const content = update.content;
+  const successfulReply = direction === 'out' && request && !frame.error;
+  const sessionId = frame.params?.sessionId ?? result.sessionId ?? request?.sessionId;
+  let currentModel; let modelEvidence;
+  if (successfulReply && method === 'session/set_model') {
+    currentModel = result._meta?.hermes?.activeModelId;
+    modelEvidence = 'hermes-active-model';
+  }
+  if (!currentModel && successfulReply && ['session/new', 'session/resume', 'session/load', 'session/set_model', 'session/set_config_option'].includes(method)) {
+    currentModel = result.models?.currentModelId ?? result.configOptions?.find((option) => option.id === 'model')?.currentValue;
+    modelEvidence = 'acp-model-state';
+  }
+  if (direction === 'out' && frame.method === 'session/update' && update.sessionUpdate === 'current_model_update') {
+    currentModel = update.currentModelId; modelEvidence = 'acp-model-state';
+  }
+  if (direction === 'out' && frame.method === 'session/update' && update.sessionUpdate === 'config_option_update') {
+    currentModel = update.configOptions?.find((option) => option.id === 'model')?.currentValue;
+    modelEvidence = 'acp-model-state';
+  }
+  if (typeof currentModel !== 'string' || !currentModel.trim()) {
+    currentModel = undefined; modelEvidence = undefined;
+  }
   return {
     direction, method, id: frame.id, reply: !frame.method,
     error: Boolean(frame.error), errorCode: frame.error?.code,
-    sessionHash: frame.params?.sessionId ? digest(frame.params.sessionId)
-      : result.sessionId ? digest(result.sessionId) : undefined,
+    sessionHash: sessionId ? digest(sessionId) : undefined,
     model: frame.params?.modelId,
-    currentModel: result.models?.currentModelId ?? update.currentModelId
-      ?? result.configOptions?.find((option) => option.id === 'model')?.currentValue,
-    defaultModel: method === 'session/new' ? result.models?.currentModelId : undefined,
+    currentModel, modelEvidence,
+    defaultModel: successfulReply && method === 'session/new' ? result.models?.currentModelId : undefined,
     protocolVersion: result.protocolVersion,
     agentName: result.agentInfo?.name, agentVersion: result.agentInfo?.version,
     resumeAdvertised: method === 'initialize' && !frame.method
