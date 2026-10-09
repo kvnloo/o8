@@ -13,7 +13,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { laneGit } from '@/lib/lane/lane-git';
-import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
+import { confinedVerificationExecFile } from './confined-verification-exec';
 
 const execFileAsync = promisify(execFile);
 
@@ -220,7 +220,7 @@ async function lintSnapshot(input: {
     ...input.files,
   ];
   try {
-    const { stdout, stderr } = await materializationAwareExecFile(process.execPath, args, {
+    const { stdout, stderr } = await confinedVerificationExecFile(process.execPath, args, {
       windowsHide: true,
       cwd: input.cwd,
       timeout: remainingTimeout(input.deadline),
@@ -235,8 +235,14 @@ async function lintSnapshot(input: {
     const stderr = error instanceof Error && 'stderr' in error
       ? String((error as { stderr?: unknown }).stderr ?? '')
       : errorOutput(error);
-    if (stdout.trim()) return parseEslintResults(stdout, stderr);
-    throw new Error(stderr || errorOutput(error));
+    // Only ESLint's normal findings exit may carry a usable diagnostic report.
+    // Config/internal errors and supervisor refusals must not be turned into
+    // a successful check merely because their partial output is valid JSON.
+    const code = error instanceof Error && 'code' in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code === 1 && stdout.trim()) return parseEslintResults(stdout, stderr);
+    throw new Error(`ESLint execution failed (exit ${String(code ?? 'unknown')}).\n${stderr || errorOutput(error)}`);
   }
 }
 

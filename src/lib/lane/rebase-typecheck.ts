@@ -1,9 +1,9 @@
 
 import { detectTypecheckSkip, isMissingTscOutput } from './typecheck-availability';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
-import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
+import { confinedVerificationExecFile } from './confined-verification-exec';
 
-const execFileAsync = materializationAwareExecFile;
+const execFileAsync = confinedVerificationExecFile;
 
 const TYPECHECK_TIMEOUT_MS = 120_000;
 const TYPECHECK_MAX_BUFFER_BYTES = 4 * 1024 * 1024;

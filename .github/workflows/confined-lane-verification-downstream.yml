@@ -20,6 +20,8 @@ jobs:
           cache: npm
       - run: npm install -g npm@11
       - run: npm ci --prefer-offline
+      - name: Lint execution-result regressions
+        run: npm run test:integration -- src/lib/lane/rebase-lint.test.ts
       - name: Build existing governed Pi native supervisor
         run: cargo build --manifest-path src-tauri/sidecars/pi-write/Cargo.toml --release
       - name: Real-path no-host-write acceptance
