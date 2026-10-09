@@ -2,7 +2,7 @@ name: Authored intent downstream verification
 
 on:
   pull_request:
-    branches: [integration/o8-upstream-20261003-intent]
+    branches: [integration/o8-upstream-20261003-intent, feat/authored-intent-admission-3185]
 
 permissions:
   contents: read
@@ -17,11 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      BASE_SHA: 38f98a75fb88de2ef044fdedcea732b171ab827c
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -39,7 +40,7 @@ jobs:
           ref: ba9190a6dadcc5ca747c7766b3b53bfc246ce53e
           path: .test-deps/aodl
           persist-credentials: false
-      - name: Real AODL subprocess through o8 persisted route
+      - name: Real AODL subprocess through persisted and exact-reference routes
         env:
           O8_AODL_SOURCE_DIR: ${{ github.workspace }}/.test-deps/aodl
         run: |
@@ -47,7 +48,7 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
       - name: Touched lint
-        run: npx eslint src/lib/orchestrator/aodl-validation.ts src/lib/orchestrator/intent-contract-store.ts src/app/api/orchestrator/intent-contract/route.ts src/app/api/orchestrator/intent-contract/route.test.ts
+        run: npx eslint src/lib/orchestrator/aodl-validation.ts src/lib/orchestrator/intent-contract-store.ts src/lib/orchestrator/intent-reference-resolution.ts src/app/api/orchestrator/intent-contract/route.ts src/app/api/orchestrator/intent-contract/resolve/route.ts src/app/api/orchestrator/intent-contract/route.test.ts tests/aodl-consumer-real-path.test.ts
       - name: Repository rules
         run: npm run rule-check -- --base="$BASE_SHA"
       - name: Hermetic completion gate

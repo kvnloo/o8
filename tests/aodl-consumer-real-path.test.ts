@@ -1,19 +1,26 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { IntentContractRef } from '@/lib/orchestrator/aodl-validation';
 
 // Real AODL Python subprocess and real o8 route + store. Only the existing
 // operator principal and isolated data-root boundaries are fixture-controlled.
-const state = vi.hoisted(() => ({ root: '', role: 'operator' }));
+const state = vi.hoisted(() => ({
+  root: '', role: 'operator', authenticated: true, principalChecks: 0, revokeAt: Infinity,
+}));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.root }));
-vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
+vi.mock('@/lib/panel/auth', () => ({
+  requirePanelAuth: () => state.authenticated ? null : NextResponse.json({ error: 'unauthorized' }, { status: 401 }),
+}));
 vi.mock('@/lib/auth/principal', () => ({
-  resolveRequestPrincipalContext: () => ({ role: state.role }),
+  resolveRequestPrincipalContext: () => ({ role: ++state.principalChecks >= state.revokeAt ? 'worker' : state.role }),
 }));
 const { POST, GET } = await import('@/app/api/orchestrator/intent-contract/route');
+const { POST: RESOLVE } = await import('@/app/api/orchestrator/intent-contract/resolve/route');
 
 const origin = 'http://localhost/api/orchestrator/intent-contract';
 function doc(revision = 0, tokens = 100) {
@@ -34,8 +41,24 @@ function post(raw: string) {
 function get(revision = 0) {
   return GET(new NextRequest(`${origin}?id=intent-consumer&revision=${revision}`));
 }
+function resolveRaw(body: string | ArrayBuffer) {
+  state.principalChecks = 0;
+  return RESOLVE(new NextRequest(`${origin}/resolve`, { method: 'POST', body }));
+}
+function resolveRef(ref: unknown) { return resolveRaw(JSON.stringify(ref)); }
+async function storedRef(): Promise<IntentContractRef> {
+  const result = await post(doc());
+  expect(result.status).toBe(200);
+  return (await result.json()).record.ref;
+}
+function storedPath() {
+  const id = createHash('sha256').update('intent-consumer').digest('hex');
+  return join(state.root, 'intent-contracts', id, '0.json');
+}
 
+let previousRevision: string | undefined;
 beforeEach(async () => {
+  previousRevision = process.env.O8_AODL_VALIDATOR_REVISION;
   const py = process.env.O8_AODL_PYTHON;
   const source = process.env.O8_AODL_SOURCE_DIR;
   if (!py || !source) throw new Error('Pinned AODL source + Python required for this real-path lane');
@@ -44,12 +67,13 @@ beforeEach(async () => {
   if (!match) throw new Error('Pinned AODL semantic revision unavailable');
   process.env.O8_AODL_VALIDATOR_REVISION = match[1];
   state.root = await mkdtemp(join(tmpdir(), 'o8-aodl-real-route-'));
-  state.role = 'operator';
+  state.role = 'operator'; state.authenticated = true; state.principalChecks = 0; state.revokeAt = Infinity;
 });
 afterEach(async () => {
   if (state.root) await rm(state.root, { recursive: true, force: true });
   state.root = '';
-  delete process.env.O8_AODL_VALIDATOR_REVISION;
+  if (previousRevision === undefined) delete process.env.O8_AODL_VALIDATOR_REVISION;
+  else process.env.O8_AODL_VALIDATOR_REVISION = previousRevision;
 });
 
 describe('AODL subprocess → authenticated o8 intent route → durable record', () => {
@@ -94,5 +118,108 @@ describe('AODL subprocess → authenticated o8 intent route → durable record',
     expect(result.status).toBe(400);
     expect((await result.json()).error).toBe('runtime_projection_not_authored_intent');
     expect((await get()).status).toBe(404);
+  });
+});
+
+describe('exact authored-intent reference resolution', () => {
+  it('resolves exact R0 after R1 exists, without updating either revision', async () => {
+    const ref = await storedRef();
+    expect((await post(doc(1, 200))).status).toBe(200);
+    const before = await readFile(storedPath(), 'utf8');
+    const response = await resolveRef(ref);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toContain('no-store');
+    const result = await response.json();
+    expect(result.record.ref).toEqual(ref);
+    expect(result.record.document).toBe(doc());
+    expect(await readFile(storedPath(), 'utf8')).toBe(before);
+    expect((await (await get(1)).json()).record.document).toBe(doc(1, 200));
+  });
+
+  it.each(['sourceHash', 'inputSha256', 'validatorRevision', 'semanticFingerprint'] as const)(
+    'rejects mismatched %s even when id/revision exist', async (key) => {
+      const ref = await storedRef();
+      const replacement = key === 'semanticFingerprint' ? `aodl-canon-1:${'b'.repeat(64)}`
+        : 'b'.repeat(key === 'validatorRevision' ? 16 : 64);
+      const result = await resolveRef({ ...ref, [key]: replacement });
+      expect(result.status).toBe(409);
+      expect(await result.json()).toEqual({ ok: false, error: 'intent_ref_mismatch' });
+    },
+  );
+
+  it('does not alias a missing id or revision to the current revision', async () => {
+    const ref = await storedRef();
+    for (const missing of [{ ...ref, id: 'absent' }, { ...ref, revision: 99 }]) {
+      const result = await resolveRef(missing);
+      expect(result.status).toBe(404);
+      expect(await result.json()).toEqual({ ok: false, error: 'intent_not_found' });
+    }
+  });
+
+  it('rejects incomplete references, coercions and extra authority fields', async () => {
+    const ref = await storedRef();
+    for (const value of [null, [], {}, { id: ref.id, revision: 0 }, { ...ref, revision: '0' },
+      { ...ref, revision: -1 }, { ...ref, revision: 1.5 }, { ...ref, authority: 'dispatch' },
+      { ...ref, semanticFingerprint: `unknown:${'b'.repeat(64)}` }]) {
+      const result = await resolveRef(value);
+      expect(result.status).toBe(400);
+      expect(await result.json()).toEqual({ ok: false, error: 'invalid_intent_ref' });
+    }
+  });
+
+  it('bounds streamed bytes and rejects invalid JSON/UTF-8', async () => {
+    const oversized = await resolveRaw(' '.repeat(1025));
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toEqual({ ok: false, error: 'intent_ref_too_large' });
+    for (const body of ['{', new Uint8Array([0xff]).buffer]) {
+      const result = await resolveRaw(body);
+      expect(result.status).toBe(400);
+      expect(await result.json()).toEqual({ ok: false, error: 'invalid_intent_ref' });
+    }
+  });
+
+  it.each(['worker', 'device'])('refuses %s callers before returning a stored document', async (role) => {
+    const ref = await storedRef(); state.role = role;
+    const result = await resolveRef(ref);
+    expect(result.status).toBe(403);
+    expect(await result.json()).toEqual({ ok: false, error: 'operator_required' });
+  });
+
+  it('refuses unauthenticated callers and rechecks principal after validation', async () => {
+    const ref = await storedRef(); state.authenticated = false;
+    expect((await resolveRef(ref)).status).toBe(401);
+    state.authenticated = true; state.revokeAt = 2;
+    const result = await resolveRef(ref);
+    expect(result.status).toBe(403);
+    expect(await result.json()).toEqual({ ok: false, error: 'operator_required' });
+  });
+
+  it('fails closed when canonical verification is not configured', async () => {
+    const ref = await storedRef();
+    delete process.env.O8_AODL_VALIDATOR_REVISION;
+    const result = await resolveRef(ref);
+    expect(result.status).toBe(503);
+    expect(await result.json()).toEqual({ ok: false, error: 'aodl_not_configured' });
+  });
+
+  it('recomputes identity instead of trusting matching caller/store fingerprints', async () => {
+    await storedRef();
+    const record = JSON.parse(await readFile(storedPath(), 'utf8'));
+    record.ref.semanticFingerprint = `aodl-canon-1:${'b'.repeat(64)}`;
+    const damaged = JSON.stringify(record);
+    await writeFile(storedPath(), damaged);
+    const result = await resolveRef(record.ref);
+    expect(result.status).toBe(500);
+    expect(await result.json()).toEqual({ ok: false, error: 'intent_record_identity_mismatch' });
+    expect(await readFile(storedPath(), 'utf8')).toBe(damaged);
+  });
+
+  it('rejects malformed persisted state rather than repairing it', async () => {
+    const ref = await storedRef();
+    await writeFile(storedPath(), '{');
+    const result = await resolveRef(ref);
+    expect(result.status).toBe(500);
+    expect(await result.json()).toEqual({ ok: false, error: 'invalid_intent_record' });
+    expect(await readFile(storedPath(), 'utf8')).toBe('{');
   });
 });
