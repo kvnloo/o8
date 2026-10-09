@@ -1,3 +1,5 @@
+import { IntentContractError } from '@/lib/orchestrator/aodl-validation';
+import { prepareMissionIntentRequest, assertMissionIntentReceipt } from '@/lib/orchestrator/mission-intent-admission';
 import { MissionProjectScopeError } from '@/lib/orchestrator/mission-project-context';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -124,6 +126,13 @@ export async function POST(request: NextRequest) {
   const record = asRecord(body);
   if (!record) {
     return operatorError('invalid_request', 'Invalid JSON body.', 400);
+  }
+  let intentRequest: ReturnType<typeof prepareMissionIntentRequest>;
+  try {
+    intentRequest = prepareMissionIntentRequest(request, record.authoredIntentRef);
+  } catch (error) {
+    if (error instanceof IntentContractError) return operatorError(error.code, error.code, error.status);
+    return operatorError('intent_admission_unavailable', 'Intent admission is unavailable.', 503);
   }
   const clientKey = typeof record.clientMutationId === 'string'
     ? record.clientMutationId.trim()
@@ -381,6 +390,7 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'projectId must be a non-empty project identifier.', 400);
   }
   const createInput = {
+      ...(intentRequest.authoredIntentRef ? { authoredIntentRef: intentRequest.authoredIntentRef } : {}),
       issues,
       repoPath,
       ...(typeof record.projectId === 'string' ? { projectId: record.projectId.trim() } : {}),
@@ -417,25 +427,32 @@ export async function POST(request: NextRequest) {
       ...(qualitySearch ? { qualitySearch } : {}),
   };
   const canonicalBody = JSON.stringify(createInput);
-  const binding = bindIdempotencyClientMutation({ namespace: 'create_mission', clientKey, body: canonicalBody });
-  if (binding.status === 'conflict') {
-    return operatorError('idempotency_conflict', 'clientMutationId was used for another mission.', 409);
-  }
-  if (binding.status === 'unavailable') {
-    return operatorError('idempotency_unavailable', 'The mission creation receipt store is unavailable.', 503);
-  }
   try {
+    intentRequest.assertAuthoredIntentAdmission?.();
+    const binding = bindIdempotencyClientMutation({ namespace: 'create_mission', clientKey, body: canonicalBody });
+    if (binding.status === 'conflict') {
+      return operatorError('idempotency_conflict', 'clientMutationId was used for another mission.', 409);
+    }
+    if (binding.status === 'unavailable') {
+      return operatorError('idempotency_unavailable', 'The mission creation receipt store is unavailable.', 503);
+    }
     const outcome = await withIdempotency({
       key: deriveIdempotencyKey({ verb: 'create_mission', scopeId: repoPath, clientKey, body: canonicalBody }),
       verb: 'create_mission',
       scopeId: repoPath,
       reconcileUnresolved: async () => {
-        return findMissionByCreationMutationId(clientKey)?.creationReceipt ?? null;
+        intentRequest.assertAuthoredIntentAdmission?.();
+        const receipt = findMissionByCreationMutationId(clientKey)?.creationReceipt ?? null;
+        if (receipt !== null) assertMissionIntentReceipt(intentRequest.authoredIntentRef, receipt);
+        return receipt;
       },
-    }, () => createMission({ ...createInput, clientMutationId: clientKey }));
+    }, () => createMission({ ...createInput, ...intentRequest, clientMutationId: clientKey }));
+    intentRequest.assertAuthoredIntentAdmission?.();
     if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'mission creation') ?? operatorSuccess(replayShape(outcome), 202);
+    assertMissionIntentReceipt(intentRequest.authoredIntentRef, outcome.result);
     return operatorSuccess(replayShape(outcome), 201);
   } catch (error) {
+    if (error instanceof IntentContractError) return operatorError(error.code, error.code, error.status);
     if (error instanceof MissionProjectScopeError) return operatorError(error.code, error.message, 400);
     if (error instanceof ControlPlaneLockTimeoutError) {
       return operatorError(

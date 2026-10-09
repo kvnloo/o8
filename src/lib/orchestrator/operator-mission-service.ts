@@ -1,6 +1,8 @@
+import type { CreateMissionInput as MissionInput } from './operator-mission-service/types';
+import type { AuthoredMissionInput } from './mission-intent-admission';
+export type CreateMissionInput = MissionInput & AuthoredMissionInput;
 export type {
   ApproveAndMergeInput,
-  CreateMissionInput,
   DispatchMissionInput,
   ExistingBranchPolicy,
   LoadedIssue,

@@ -57,7 +57,7 @@ import {
   normalizeLoadedIssue,
 } from './shared';
 import type { CreateMissionInput, DispatchMissionInput, MissionStatusInput } from './types';
-
+import { prepareAuthoredMissionIntent, type AuthoredMissionInput } from '@/lib/orchestrator/mission-intent-admission';
 const INLINE_BRANCH_MAX_LENGTH = 60;
 export const MISSION_CREATE_LOCK_WAIT_MS = 30_000;
 
@@ -91,7 +91,8 @@ export function resolveMissionDispatchTarget(missionId?: string): string {
   return requestedMissionId;
 }
 
-export async function createMission(input: CreateMissionInput) {
+export async function createMission(input: CreateMissionInput & AuthoredMissionInput) {
+  const intentAdmission = await prepareAuthoredMissionIntent(input);
   const repoPath = ensureRepoPath(input.repoPath);
   const projectContext = await captureMissionProject(repoPath, input.projectId);
   if (!Array.isArray(input.issues) || input.issues.length === 0) {
@@ -156,6 +157,7 @@ export async function createMission(input: CreateMissionInput) {
   if (executionCarrier) {
     for (const routing of packetRoutings) assertExecutionCarrierCompatible(executionCarrier, routing.selectedRuntime);
   }
+  intentAdmission.assertAuthorized();
   const branchPreparation = await prepareMissionBranches({
     repoPath,
     candidates: loadedIssues.map((issue, index) => ({
@@ -298,6 +300,7 @@ export async function createMission(input: CreateMissionInput) {
   });
   const waves = new Map(buildDependencyGraph(missionBase.packets).map((node) => [node.packetId, node.wave] as const));
   const creationReceipt = {
+    ...intentAdmission.receiptFields,
     missionId,
     packets: missionBase.packets.map((packet) => ({ id: packet.id, title: packet.title, wave: waves.get(packet.id) ?? 1 })),
     branchPreparation: branchPreparation.filter((decision) => decision.action !== 'none'),
@@ -309,6 +312,7 @@ export async function createMission(input: CreateMissionInput) {
   const persisted = await withMissionHandoffBarrier(async () => {
     const { state, result: outgoing } = await withLockedState(
       async (current) => {
+        intentAdmission.assertAuthorized();
         if (supersedingThreadId) {
           cancelSupersededMissionPackets(current, {
             threadId: supersedingThreadId,
