@@ -14,6 +14,16 @@ function longReply(opening: string, conclusion: string) {
 }
 
 describe('excerptTranscriptEntries (#2959)', () => {
+  it('retains the complete ending when the omission marker gains a digit', () => {
+    const ending = 'FINAL-ENDING';
+    const excerpt = excerptTranscriptEntries([
+      entry({ id: 'long', role: 'assistant', text: `${'a'.repeat(1300 - ending.length)}${ending}` }),
+      entry({ id: 'newest', role: 'user', text: 'b'.repeat(2283) }),
+    ], 8, 2600, { preferNewest: true, preserveTurnEnding: true });
+    expect(excerpt.length).toBeLessThanOrEqual(2600);
+    expect(excerpt).toContain(ending);
+  });
+
   it('keeps the newest turn and a long reply ending when preferNewest+preserveTurnEnding', () => {
     const conclusion = 'Retained conclusion: CI passed on all three runners.';
     const newest = 'Newest operator turn: ship the packet.';

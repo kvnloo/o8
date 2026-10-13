@@ -112,7 +112,8 @@ function clipSlashExcerptTurn(text: string, maxChars: number) {
   if (maxChars <= 1) return '…';
   const headBudget = Math.min(SLASH_EXCERPT_TURN_HEAD_CHARS, Math.max(20, Math.floor(maxChars * 0.25)));
   const markerFor = (omitted: number) => `\n[... ${omitted} characters omitted ...]\n`;
-  const probeMarker = markerFor(Math.max(0, text.length - headBudget - SLASH_EXCERPT_TURN_TAIL_CHARS));
+  // Reserve the largest possible omission count so a digit boundary cannot cut the tail.
+  const probeMarker = markerFor(text.length);
   const preferredTail = Math.min(SLASH_EXCERPT_TURN_TAIL_CHARS, Math.max(40, maxChars - headBudget - probeMarker.length));
   const tailBudget = Math.min(preferredTail, maxChars - headBudget - probeMarker.length);
   if (tailBudget < 40) {
