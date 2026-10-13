@@ -150,7 +150,9 @@ export function excerptTranscriptEntries(
 ) {
   const preferNewest = options?.preferNewest === true;
   const preserveTurnEnding = options?.preserveTurnEnding === true;
-  const window = entries.slice(0, maxEntries);
+  const window = preferNewest
+    ? entries.slice(Math.max(0, entries.length - maxEntries))
+    : entries.slice(0, maxEntries);
   let remaining = maxChars;
   const chunks: string[] = [];
 
