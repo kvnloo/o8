@@ -32,6 +32,7 @@ const REQUIRED_BINARIES = Object.freeze([
   'Contents/MacOS/o8',
   'Contents/MacOS/speech_recognizer',
   'Contents/MacOS/speech-local',
+  'Contents/MacOS/o8-pi-write',
 ]);
 
 function architectureForCpuType(cpuType) {
@@ -122,6 +123,12 @@ export function resolveMacosReleaseArtifacts(root, version) {
     updaterSignature: join(macosDir, 'o8.app.tar.gz.sig'),
     dmg: join(bundleDir, 'dmg', `o8_${version}_universal.dmg`),
   };
+}
+
+export function stageMacosDmgApp(appPath, stagingPath) {
+  // Preserve signed bundle modes and relative symlinks regardless of the
+  // process umask; fs.cpSync can strip permission bits during staging.
+  execFileSync('/usr/bin/ditto', [appPath, join(stagingPath, 'o8.app')], { stdio: 'pipe' });
 }
 
 export function verifyUniversalMacApp(appPath) {

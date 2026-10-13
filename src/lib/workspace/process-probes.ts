@@ -21,6 +21,8 @@ interface CommandReceipt {
 }
 
 export interface OwnedProcessProbeOptions {
+  /** Exact terminal retirement only; archival never grants execution authority. */
+  allowArchivedRetirement?: true;
   run?: (command: string, args: string[], timeoutMs: number) => Promise<CommandReceipt>;
   readCwdSnapshot?: () => Promise<ProcessCwdSnapshot>;
   now?: () => Date;
@@ -228,7 +230,7 @@ async function probeRetainedRun(
     : processProbe('descendants', 'unknown', 'The retained run has no valid PID for descendant traversal.'));
 
   if (runIdentity.processMarker) {
-    const marker = await run('ps', ['eww', '-axo', 'pid=,command='], 3_000);
+    const marker = await run('ps', ['axeww', '-o', 'pid=,command='], 3_000);
     if (commandUnavailable(marker)) {
       probes.push(processProbe('owned_marker', 'unknown', 'ps cannot scan inherited owned-run markers.'));
     } else if (marker.code !== 0) {
@@ -293,7 +295,10 @@ export async function probeOwnedSessionProcessQuiescence(
     );
   }
   const receipt = await lifecycle.getWorkspaceBinding(surfaceId).catch(() => null);
-  if (!receipt || receipt.sessionState !== 'active') {
+  if (!receipt || (receipt.sessionState !== 'active'
+    && !(options.allowArchivedRetirement && receipt.sessionState === 'archived'
+      && receipt.activeRun === null && Array.isArray(receipt.retainedRuns)
+      && receipt.retainedRuns.every(runIdentity => runIdentity.outcome !== 'running')))) {
     return synthesizeProcessQuiescence(
       { ownership: receipt ? 'owned' : 'unknown', pidIdentity: 'unknown', sessionKey: surfaceId },
       [],

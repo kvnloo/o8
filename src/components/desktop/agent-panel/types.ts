@@ -198,6 +198,8 @@ export interface WorkspaceAgentLaunchRequest {
 }
 
 export interface AgentPanelProps {
+  /** Global destinations and account controls live in the adjacent navigation rail. */
+  navigationRail?: boolean;
   activeSessionKey?: string | null;
   selectedRepo?: string | null;
   selectedRepoBranch?: string | null;
@@ -205,7 +207,7 @@ export interface AgentPanelProps {
   /** Repository bound to the focused workspace tab, independent of browsing. */
   workingRepoPath?: string | null;
   activeWorkspacePath?: string | null;
-  activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas' | null;
+  activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'chatgpt-plan' | 'canvas' | 'orchestrator' | 'fleet-canvas' | null;
   onFocusOrchestratorTab?: () => void;
   onFocusAssistantTab?: () => void;
   /** Spawn a fresh Orchestrator tab. The optional repo scopes the new

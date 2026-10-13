@@ -24,7 +24,7 @@ export interface PersistedChatCheckpoint {
 export interface PersistedTab {
   id: string;
   label: string;
-  kind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas'; // defaults to 'terminal' for backward compat
+  kind?: 'terminal' | 'chat' | 'llm-chat' | 'chatgpt-plan' | 'canvas' | 'orchestrator' | 'fleet-canvas'; // defaults to 'terminal' for backward compat
   cliAgent: string; // 'shell' | 'claude' | 'codex' | etc
   repoName?: string;
   repoPath?: string;
@@ -112,6 +112,12 @@ export type PersistedRuntimeSessionKey =
   | `pi-owned:${string}`;
 
 const API_PATH = '/api/panel/terminal-state';
+
+export function persistedTabStateSavedAt(state: unknown): number {
+  const savedAt = (state as Partial<PersistedTabState> | null)?.savedAt;
+  const timestamp = typeof savedAt === 'string' ? Date.parse(savedAt) : NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
 
 /**
  * Hard cap on persisted tabs per scope. Dogfood-week users accumulate dozens of

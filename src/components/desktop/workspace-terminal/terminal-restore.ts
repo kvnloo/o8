@@ -4,6 +4,7 @@ import {
   formatPersistedRuntimeSessionKey,
   loadLiveRuntimeSessionKeys,
   loadTabState,
+  persistedTabStateSavedAt,
   sanitizePersistedTabState,
   stripPersistedRuntimeSessionKey,
   type PersistedRuntimeSessionKey,
@@ -24,7 +25,7 @@ import {
 
 export interface ApplyPersistedStateOptions {
   preferredRepo: RegisteredRepo | null;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   createDefaultChatTab: () => TerminalTab;
 }
 
@@ -291,6 +292,13 @@ export async function computeRestoredTabs(
       continue;
     }
 
+    if (tabKind === 'chatgpt-plan') {
+      const tabId = claimWorkspaceTabId('chatgpt-plan', seenTabIds, savedTab.id);
+      restoredTabs.push({ id: tabId, label: savedTab.label || 'ChatGPT plan', kind: 'chatgpt-plan', tmuxSession: null, createdAt: now, lastActivity: now });
+      if (savedTab.id === saved.activeTabId) restoredActiveTabId = tabId;
+      continue;
+    }
+
     if (tabKind === 'llm-chat') {
       const tabId = claimWorkspaceTabId('llm-chat', seenTabIds, savedTab.id);
       restoredTabs.push({
@@ -495,7 +503,7 @@ export async function computeRestoredTabs(
   let finalTabs: TerminalTab[];
   let nextActiveId: string;
 
-  if (options.defaultTab === 'llm-chat') {
+  if (options.defaultTab !== 'terminal') {
     const restoredChat = restoredTabs.find((tab) => tab.kind === 'llm-chat');
     if (restoredChat) {
       nextActiveId = effectiveRestoredActiveId ?? restoredChat.id;
@@ -534,7 +542,7 @@ export async function computeRestoredTabs(
 
 export interface LoadInitialTabStateOptions {
   stateScope: string;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   splitCreated: boolean;
   preferredRepoPath: string | null;
 }
@@ -668,7 +676,7 @@ export function canPreserveScopedTabs(
   // reconstruction (the badge "doesn't survive" per WorkspaceChatPane). Without
   // this, a scope oscillation cleared the tab and the transcript vanished into
   // the empty picker.
-  const hasChatSessionTabs = currentTabs.some((tab) => tab.kind === 'chat');
+  const hasChatSessionTabs = currentTabs.some((tab) => tab.kind === 'chat' || tab.kind === 'chatgpt-plan');
   if (hasChatSessionTabs) return true;
   // Same doctrine for the operator's OWN conversations (GQXEZD, 2026-07-16):
   // an orchestrator tab bound to a thread — or one the user JUST spawned
@@ -727,9 +735,21 @@ export async function loadInitialTabState(
     || savedRepoPaths.length === 0
     || savedRepoPaths.includes(options.preferredRepoPath);
 
+  const selectedTabId = saved?.activeTabId;
+  const selectedTab = saved?.tabs.find((tab) => tab.id === selectedTabId);
+  const selectedConversation = selectedTab?.kind === 'orchestrator'
+    ? Boolean(selectedTab.orchestratorThreadId || selectedTab.id.startsWith('thoughts-'))
+    : selectedTab?.kind === 'chat' && Boolean(selectedTab.chatSessionKey || selectedTab.claudeSessionId);
+  // The primary conversation follows sidebar selection independently of the
+  // global repo preference. Keep a newer, explicitly bound selection; other
+  // workspace scopes retain their repo-specific restore behavior.
+  const newerPrimaryConversation = options.stateScope === 'tile-root'
+    && selectedConversation && persistedTabStateSavedAt(saved) > 0
+    && persistedTabStateSavedAt(saved) >= persistedTabStateSavedAt(repoSaved);
+
   if (
     !options.splitCreated
-    && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs))
+    && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs && !newerPrimaryConversation))
     && currentStableRepoScope
   ) {
     saved = repoSaved;

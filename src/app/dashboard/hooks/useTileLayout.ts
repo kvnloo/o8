@@ -371,15 +371,13 @@ export function useTileLayout({
     });
   }, [setTileLayout, tileLayout]);
 
-  const handleSplitTile = useCallback((tileId: string, direction: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal' | 'remote', placeBefore = false, exactPlacement = false): string | null => {
+  const handleSplitTile = useCallback((tileId: string, direction: 'horizontal' | 'vertical', initialTab?: 'orchestrator' | 'chat' | 'terminal' | 'remote', placeBefore = false, exactPlacement = false): string | null => {
     const ratio = direction === 'vertical' ? 0.55 : 0.62;
     // Split creates the same type: workspace splits → new terminal (chat), contextual splits → new contextual (shell)
     const sourceTile = findTile(tileLayout.root, tileId);
     const sourceKind = sourceTile?.type === 'leaf' ? sourceTile.content.kind : 'workspace';
-    const newKind = sourceKind === 'contextual-panel' ? 'contextual-panel' : 'terminal';
-    const nextContent = sourceTile?.type === 'leaf'
-      && sourceTile.content.kind === 'terminal'
-      && newKind === 'terminal'
+    const newKind = !initialTab && sourceKind === 'contextual-panel' ? 'contextual-panel' : 'terminal';
+    const nextContent = newKind === 'terminal'
       ? {
           kind: 'terminal' as const,
           repoPath: null,
@@ -590,10 +588,8 @@ export function useTileLayout({
 
     const workspacePath = tab.meta?.workspace ?? (tab.kind === 'readme' || tab.kind === 'git-log' ? tab.resourceId : null);
     if (workspacePath) {
-      const matchedRepo = globalRepoEntries.find((repo) => (
-        workspacePath === repo.localPath
-        || workspacePath.startsWith(`${repo.localPath}/`)
-      ));
+      const matchedRepo = globalRepoEntries.find((repo) => workspacePath === repo.localPath)
+        ?? globalRepoEntries.find((repo) => workspacePath.startsWith(`${repo.localPath}/`));
       if (matchedRepo) {
         return matchedRepo.localPath;
       }
@@ -602,6 +598,7 @@ export function useTileLayout({
     switch (tab.kind) {
       case 'issue':
       case 'pr':
+      case 'pull-requests':
       case 'file':
       case 'diff':
       case 'commit':

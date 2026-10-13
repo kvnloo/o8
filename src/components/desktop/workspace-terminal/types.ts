@@ -65,7 +65,7 @@ export interface TerminalTab {
    *                       canvas (experimentalCanvas flag).
    *                       NOT the same as 'canvas'.
    */
-  kind: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas';
+  kind: 'terminal' | 'chat' | 'llm-chat' | 'chatgpt-plan' | 'canvas' | 'orchestrator' | 'fleet-canvas';
   tmuxSession: string | null;
   /** Live run views attach to an existing PTY but must never send it input. */
   readOnly?: boolean;
@@ -244,6 +244,7 @@ export interface TerminalTabHandle {
       id: string;
       label: string;
       kind: TerminalTab['kind'];
+      canvasKind?: CanvasTab['kind'];
       sessionKey?: string;
       laneId?: string | null;
       packetId?: string | null;
@@ -278,7 +279,7 @@ export interface TerminalTabHandle {
 export interface WorkspaceTerminalProps {
   stateScope: string;
   activeWorkspaceSurface?: boolean;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   autoCreateDefaultTab?: boolean;
   preferredRepo?: RegisteredRepo | null;
   /** Current Projects/sidebar selection. New sessions inherit this before

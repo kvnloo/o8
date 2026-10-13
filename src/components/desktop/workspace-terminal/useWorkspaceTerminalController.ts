@@ -1,6 +1,7 @@
 'use client';
 
 import { retargetWorkspaceTab } from './retarget-workspace-tab';
+import { useTextChatTabs } from './use-text-chat-tabs';
 
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ForwardedRef, type MouseEvent as ReactMouseEvent } from 'react';
 import {
@@ -52,7 +53,6 @@ import {
 import {
   buildHistoryChatTab,
   buildNewChatTab,
-  buildNewLlmChatTab,
   buildPersistedState,
   computeCheckpointRestore,
   deferRemoteTerminalLaunch,
@@ -184,7 +184,7 @@ export function useWorkspaceTerminalController(
     }
     tabsRef.current = nextTabs;
   }, []);
-
+  const getTabInventory = useCallback(() => tabsRef.current.map(tab => tab.id), []);
   // A monotonic user-navigation version prevents a late restore from
   // replacing a newer tab selection.
   const userNavVersionRef = useRef(0);
@@ -563,9 +563,9 @@ export function useWorkspaceTerminalController(
     if (!experimentalChat) return [createDefaultOrchestratorTab()];
     return [createDefaultOrchestratorTab(), createDefaultChatTab()];
   }, [createDefaultChatTab, createDefaultOrchestratorTab, experimentalChat]);
-  const createInitialChatTabs = useCallback((): TerminalTab[] => splitCreated
-    ? [experimentalChat ? createDefaultChatTab() : createDefaultOrchestratorTab({ fresh: true })]
-    : createDefaultChatTabSet(), [createDefaultChatTab, createDefaultChatTabSet, createDefaultOrchestratorTab, experimentalChat, splitCreated]);
+  const createInitialChatTabs = useCallback((): TerminalTab[] => defaultTab === 'orchestrator'
+    ? [createDefaultOrchestratorTab({ fresh: true, repoOverride: selectedRepoRef.current })] : splitCreated ? [experimentalChat ? createDefaultChatTab() : createDefaultOrchestratorTab({ fresh: true })]
+    : createDefaultChatTabSet(), [createDefaultChatTab, createDefaultChatTabSet, createDefaultOrchestratorTab, defaultTab, experimentalChat, splitCreated]);
 
   const spawnSingleRuntimeTab = useCallback((runtime: OrchestratorRuntime): string => {
     const newTab: TerminalTab = {
@@ -698,7 +698,7 @@ export function useWorkspaceTerminalController(
     const result = await computeRestoredTabs(saved, {
       preferredRepo: preferredRepoRef.current,
       defaultTab,
-      createDefaultChatTab,
+      createDefaultChatTab: defaultTab === 'orchestrator' ? () => createInitialChatTabs()[0] : createDefaultChatTab,
     }, cancelled, 'optimistic');
     if (!result) return false;
 
@@ -728,7 +728,7 @@ export function useWorkspaceTerminalController(
     void computeRestoredTabs(saved, {
       preferredRepo: preferredRepoRef.current,
       defaultTab,
-      createDefaultChatTab,
+      createDefaultChatTab: defaultTab === 'orchestrator' ? () => createInitialChatTabs()[0] : createDefaultChatTab,
     }, () => cancelled?.() || restoreGeneration !== restoreGenerationRef.current, 'validated').then((validated) => {
       if (!validated || cancelled?.() || restoreGeneration !== restoreGenerationRef.current) return;
       const currentById = new Map(tabsRef.current.map((tab) => [tab.id, tab]));
@@ -755,7 +755,7 @@ export function useWorkspaceTerminalController(
       }
     });
     return result.restoredAny;
-  }, [createDefaultChatTab, defaultTab, landTerminalTabs, requestTerminalForTab, sendTerminalAttach, setActiveTabIdFromRestore]);
+  }, [createDefaultChatTab, createInitialChatTabs, defaultTab, landTerminalTabs, requestTerminalForTab, sendTerminalAttach, setActiveTabIdFromRestore]);
 
   useEffect(() => {
     if (restoredRef.current) return;
@@ -791,7 +791,7 @@ export function useWorkspaceTerminalController(
           await applyPersistedState(saved, () => cancelled);
           if (cancelled) return;
         } else if (autoCreateDefaultTab) {
-          if (defaultTab === 'llm-chat') {
+          if (defaultTab !== 'terminal') {
             const defaultTabs = createInitialChatTabs();
             tabsRef.current = defaultTabs;
             setTabs(defaultTabs);
@@ -893,7 +893,7 @@ export function useWorkspaceTerminalController(
           setActiveTabIdFromRestore('', capturedNavVersion);
           return;
         }
-        if (defaultTab === 'llm-chat') {
+        if (defaultTab !== 'terminal') {
           const defaultTabs = createInitialChatTabs();
           tabsRef.current = defaultTabs;
           setTabs(defaultTabs);
@@ -913,7 +913,7 @@ export function useWorkspaceTerminalController(
   }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createInitialChatTabs, createDefaultShellTab, defaultTab, preferredRepo?.localPath, primaryRestoreSettled, requestTerminalForTab, setActiveTabIdFromRestore, splitCreated, stableRepoScope, tabs.length, termWsConnected]);
 
   useEffect(() => {
-    if (tabs.length > 0 || defaultTab !== 'llm-chat') return;
+    if (tabs.length > 0 || defaultTab === 'terminal') return;
     const timer = window.setTimeout(() => {
       if (tabsRef.current.length > 0) return;
       const fallbacks = createInitialChatTabs();
@@ -1198,14 +1198,9 @@ export function useWorkspaceTerminalController(
     setActiveTabIdFromUser(newTab.id);
   }, [setActiveTabIdFromUser]);
 
-  const handleNewLLMChatTab = useCallback((repo?: RegisteredRepo) => {
-    const newTab = buildNewLlmChatTab(repo ?? preferredRepo ?? undefined);
-    const nextTabs = [...tabsRef.current, newTab];
-    tabsRef.current = nextTabs;
-    setTabs(nextTabs);
-    persistTabsNow(nextTabs, newTab.id);
-    setActiveTabIdFromUser(newTab.id);
-  }, [persistTabsNow, preferredRepo, setActiveTabIdFromUser]);
+  const { handleNewLLMChatTab, handleNewChatGPTPlanTab } = useTextChatTabs({
+    preferredRepo, tabsRef, setTabs, persistTabsNow, setActiveTabIdFromUser,
+  });
 
   const handleUpdateChatMessages = useCallback((tabId: string, messages: MobileTranscriptEntry[]) => {
     setTabs((previous) => previous.map((tab) => (
@@ -1424,6 +1419,7 @@ export function useWorkspaceTerminalController(
     handleDragStart,
     handleNewChatTab,
     handleNewLLMChatTab,
+    handleNewChatGPTPlanTab,
     handleNewTab,
     openRemoteTerminalTab,
     handleOpenHistoryChat,
@@ -1454,7 +1450,7 @@ export function useWorkspaceTerminalController(
     spawnFleetCanvasTab,
     handleUpdateTabMode,
     undoCleanup,
-    tabs,
+    tabs, getTabInventory,
     termWsConnected,
     visibleTabs,
   };
