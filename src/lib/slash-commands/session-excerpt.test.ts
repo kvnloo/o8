@@ -105,7 +105,7 @@ describe('slash excerpt session context (#2959)', () => {
 
   it('recall retains the search preview opening and excludes its over-budget ending', async () => {
     const commandContext = context([]);
-    commandContext.searchArchive = vi.fn(async () => [{
+    commandContext.searchArchive = vi.fn<SlashCommandContext['searchArchive']>(async () => [{
       id: 'archive', score: 1, source: 'thread', tabId: null, archivedAt: null, preview: 'fallback',
       entries: [{ id: 'hit', role: 'assistant', text: `Search opening ${'filler '.repeat(600)} search-ending-obsolete` }],
     }]);
