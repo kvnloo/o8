@@ -94,7 +94,9 @@
     "bench:coding:paired:all": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --paired --all",
     "bench:coding:e2e:preflight": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --preflight --e2e",
     "bench:coding:e2e": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --e2e",
-    "bench:coding:e2e:judge": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --e2e-judge"
+    "bench:coding:e2e:judge": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --e2e-judge",
+    "test:z0-bend": "vitest run src/lib/z0-bend/*.test.ts",
+    "bench:z0-bend": "tsx scripts/bench/z0-bend-shadow.ts"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.190",
