@@ -25,7 +25,7 @@ export async function handleHandoffSlashCommand(
     ? compacted.resumePrelude.trim()
     : [
       'Fresh-session handoff',
-      excerptTranscriptEntries(context.transcript.slice(-8), 8, 2600) || 'No existing transcript context is available.',
+      excerptTranscriptEntries(context.transcript.slice(-8), 8, 2600, { preferNewest: true, preserveTurnEnding: true }) || 'No existing transcript context is available.',
       'Continue from that context using the next operator message as the active instruction.',
     ].join('\n\n');
 

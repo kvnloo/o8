@@ -65,6 +65,8 @@ async function isVersionPulled(version: string): Promise<{ pulled: boolean; note
 }
 
 export async function relaunchInstalledUpdate(options: InstallUpdateOptions = {}): Promise<boolean> {
+  const { waitForConnectedCliUpdates } = await import('./update-hub-client');
+  await waitForConnectedCliUpdates();
   if (options.beforeRestart && !(await options.beforeRestart())) return false;
   await releaseCloudJobLeasesForRestart();
   try {

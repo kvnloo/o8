@@ -21,6 +21,14 @@ import { PI_ALLOWANCE_EXHAUSTED_MESSAGE } from '@/lib/pi/sdk/transport';
 import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
+// The inbox bridge, recorded and refused, so a Full access turn that still asks shows up as a refusal.
+const inboxCalls = vi.hoisted(() => [] as string[]);
+vi.mock('@/lib/pi/sdk/approval', () => ({
+  createPiApproval: () => async (call: { name: string; args: Record<string, unknown> }) => {
+    inboxCalls.push(`${call.name}:${String(call.args.path ?? call.args.command)}`);
+    return false;
+  },
+}));
 
 // The real app routes behind a local HTTP server and the real middleware gate:
 // /api/mcp, so the operator stdio proxy (Claude's path) and Pi's HTTP client
@@ -90,7 +98,7 @@ async function listTools(config: { command: string; args?: string[]; env?: Recor
   } finally { await peer.close({ gracefulMs: 200 }); }
 }
 
-const model = { id: 'google/gemini-2.5-flash-lite', api: 'openai-completions' as const, provider: 'o8-managed' };
+const model = { id: 'openai/gpt-6-luna', api: 'openai-completions' as const, provider: 'o8-managed' };
 function message(content: AssistantMessage['content'], stopReason: AssistantMessage['stopReason'] = 'stop',
   errorMessage?: string): AssistantMessage {
   return { role: 'assistant', content, stopReason, model: model.id, api: model.api, provider: model.provider,
@@ -162,7 +170,8 @@ describe('Pi orchestrator (#3258)', () => {
     const servers = await openO8Servers(repo, { profile: 'propose', threadId: 'thoughts-pi-test' });
     try {
       const names = (await listO8Commands(servers.servers, new AbortController().signal)).map(({ name }) => name);
-      expect(servers.servers.map(server => server.name)).toEqual(['cortex']);
+      expect(servers.servers.map(server => server.name)).toEqual(['cortex', 'visualizations']);
+      expect(names).toEqual(expect.arrayContaining(['o8_html_preview', 'o8_html_render']));
       expect(names).toContain('cortex_read_packets');
       for (const mutator of ['dispatch_mission', 'approve_and_merge', 'create_mission', 'cortex_launch_agent']) {
         expect(names).not.toContain(mutator);
@@ -289,6 +298,30 @@ describe('Pi orchestrator (#3258)', () => {
     await expect(readFile(join(repo, 'plan.md'), 'utf8')).rejects.toThrow();
   }, 180_000);
 
+  it('writes and runs without asking in Full access, as the Claude orchestrator does, and still refuses blocked commands (#3555)', async () => {
+    const { repo, stateRoot } = await fixture();
+    inboxCalls.length = 0;
+    const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot,
+      transport: script([
+        call('w1', 'write_file', { path: 'notes.txt', content: 'count = 2\n' }),
+        call('r1', 'run_command', { command: 'touch ran.txt && cat notes.txt' }),
+        call('b1', 'run_command', { command: 'eval "touch blocked.txt"' }),
+        message([{ type: 'text', text: 'Done.' }]),
+      ]) });
+    backends.push(backend);
+    const out: OrchestratorEvent[] = [];
+    await backend.sendTurn(repo, 'Set the count to 2', event => out.push(event), { threadId: 'thoughts-pi-full', permissionMode: 'full' });
+
+    expect(inboxCalls).toEqual([]);
+    expect(await readFile(join(repo, 'notes.txt'), 'utf8')).toBe('count = 2\n');
+    expect(await readFile(join(repo, 'ran.txt'), 'utf8')).toBe('');
+    await expect(readFile(join(repo, 'blocked.txt'))).rejects.toThrow();
+    const results = out.filter((event): event is Extract<OrchestratorEvent, { type: 'tool_result' }> => event.type === 'tool_result');
+    expect(results.map(result => result.name)).toEqual(['write_file', 'run_command', 'run_command']);
+    expect(results[1].output).toContain('count = 2');
+    expect(out.at(-1)).toMatchObject({ type: 'done' });
+  }, 180_000);
+
   it('runs one turn per thread: an overlapping message is refused and Pi starts once', async () => {
     const { repo, stateRoot } = await fixture();
     let opens = 0;
@@ -341,7 +374,7 @@ describe('Pi orchestrator (#3258)', () => {
     const run = createO8CommandTools(commands).find(tool => tool.definition.name === 'o8_run')!;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = await run.execute({ name: 'cortex_fleet_status', arguments: '{}' }, new AbortController().signal);
-    expect(result.content[0].text).toBe('o8 command cortex_fleet_status could not reach the o8 cortex server.');
+    expect(result.content[0]).toEqual({ type: 'text', text: 'o8 command cortex_fleet_status could not reach the o8 cortex server.' });
     expect(JSON.stringify(result)).not.toContain('secret-value');
     warn.mockRestore();
   });
