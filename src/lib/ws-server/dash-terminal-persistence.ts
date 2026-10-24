@@ -82,6 +82,11 @@ export function createDashTmuxSessionSync(
         timeout: 3000,
         stdio: 'ignore',
       });
+      // Reused sessions still need #1979 indn disabled (option is not sticky from
+      // a pre-fix create).
+      dependencies.execFileSync(tmuxBin, [
+        'set-option', '-ga', '-t', input.sessionName, 'terminal-overrides', ',xterm*:indn@',
+      ], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
       recordHealthSafely(dependencies, 'ready', 'session_reused');
       return true;
     } catch { /* not present, create it below */ }
@@ -97,6 +102,11 @@ export function createDashTmuxSessionSync(
     ], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
     dependencies.execFileSync(tmuxBin, [
       'set-option', '-t', input.sessionName, 'status', 'off',
+    ], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
+    // #1979 — disable tmux `indn` (CSI n S). xterm.js drops lines scrolled
+    // that way; without indn tmux emits line feeds that enter scrollback.
+    dependencies.execFileSync(tmuxBin, [
+      'set-option', '-ga', '-t', input.sessionName, 'terminal-overrides', ',xterm*:indn@',
     ], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
     recordHealthSafely(dependencies, 'ready', 'session_created');
     console.log(`[persistent-terminals] created backing session: ${input.sessionName}`);

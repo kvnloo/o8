@@ -94,8 +94,27 @@ describe('dashboard terminal persistence real fallback path', () => {
       execFileSync: exec,
       recordHealth,
     })).toBe(true);
-    expect(exec).toHaveBeenCalledTimes(4);
+    expect(exec).toHaveBeenCalledTimes(5);
+    expect(exec.mock.calls[4]?.[1]).toEqual([
+      'set-option', '-ga', '-t', 'cortex-dash-test', 'terminal-overrides', ',xterm*:indn@',
+    ]);
     expect(recordHealth).toHaveBeenCalledWith('ready', 'session_created');
+  });
+
+  it('disables indn on reused sessions so pre-fix tmux clients still emit LF', () => {
+    const recordHealth = vi.fn();
+    const exec = vi.fn().mockReturnValue(Buffer.from(''));
+
+    expect(createDashTmuxSessionSync(input(), {
+      resolveTmuxBinary: () => '/usr/bin/tmux',
+      execFileSync: exec,
+      recordHealth,
+    })).toBe(true);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec.mock.calls[1]?.[1]).toEqual([
+      'set-option', '-ga', '-t', 'cortex-dash-test', 'terminal-overrides', ',xterm*:indn@',
+    ]);
+    expect(recordHealth).toHaveBeenCalledWith('ready', 'session_reused');
   });
 });
 
