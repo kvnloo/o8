@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { isTauri } from '@/lib/tauri/bridge';
 import {
@@ -32,6 +32,38 @@ export function setSymonOrbMinimized(minimized: boolean): void {
     else window.localStorage.removeItem(ORB_MINIMIZED_KEY);
   } catch { /* localStorage unavailable — session-only */ }
   window.dispatchEvent(new CustomEvent(ORB_MINIMIZED_EVENT, { detail: { minimized } }));
+}
+
+export const SYMON_OVERLAY_TINT = 'color-mix(in srgb, var(--t-chat-surface-bg) 74%, transparent)';
+export const SYMON_OVERLAY_BLUR = 'blur(28px) saturate(1.5)';
+
+export function symonOverlaySurfaceStyle(options: {
+  error: boolean;
+  settled: boolean;
+  width: number;
+}): CSSProperties {
+  const blur = options.settled ? SYMON_OVERLAY_BLUR : 'none';
+  return {
+    position: 'absolute',
+    right: 0,
+    bottom: 44,
+    width: options.width,
+    paddingTop: 10,
+    paddingRight: 11,
+    paddingBottom: 10,
+    paddingLeft: 11,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: options.error ? 'var(--t-danger)' : 'var(--t-border)',
+    borderRadius: 14,
+    background: SYMON_OVERLAY_TINT,
+    color: 'var(--t-text)',
+    boxShadow: '0 12px 34px rgba(0, 0, 0, 0.2)',
+    transformOrigin: 'bottom right',
+    fontFamily: 'var(--font-sans-system)',
+    backdropFilter: blur,
+    WebkitBackdropFilter: blur,
+  };
 }
 
 export function useSymonOrbMinimized(): boolean {
@@ -101,6 +133,7 @@ export function SymonMachineControl() {
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
+  const [overlaySettled, setOverlaySettled] = useState(false);
   const [view, setView] = useState<'machine' | 'capabilities'>('machine');
   const [rightOffset, setRightOffset] = useState(16);
   const minimized = useSymonOrbMinimized();
@@ -171,6 +204,10 @@ export function SymonMachineControl() {
   }, []);
 
   useEffect(() => {
+    if (!open) setOverlaySettled(false);
+  }, [open]);
+
+  useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
@@ -198,7 +235,6 @@ export function SymonMachineControl() {
   return (
     <div
       ref={rootRef}
-      title={error || `${active.displayName} has the Symon session`}
       style={{
         position: 'fixed',
         bottom: 120,
@@ -219,25 +255,12 @@ export function SymonMachineControl() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.97 }}
             transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-            style={{
-              position: 'absolute',
-              right: 0,
-              bottom: 44,
+            onAnimationComplete={() => setOverlaySettled(true)}
+            style={symonOverlaySurfaceStyle({
+              error: Boolean(error),
+              settled: overlaySettled,
               width: view === 'capabilities' ? 360 : 220,
-              paddingTop: 10,
-              paddingRight: 11,
-              paddingBottom: 10,
-              paddingLeft: 11,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: error ? 'var(--t-danger)' : 'var(--t-border)',
-              borderRadius: 14,
-              background: 'var(--t-bg-card)',
-              color: 'var(--t-text)',
-              boxShadow: '0 12px 34px rgba(0, 0, 0, 0.2)',
-              transformOrigin: 'bottom right',
-              fontFamily: 'var(--font-sans-system)',
-            }}
+            })}
           >
             {view === 'capabilities' ? (
               <SymonCapabilitiesPanel
@@ -363,6 +386,7 @@ export function SymonMachineControl() {
         aria-label={`Symon machine: ${active.displayName}`}
         aria-expanded={open}
         aria-haspopup="dialog"
+        title={error || `${active.displayName} has the Symon session`}
         onClick={() => setOpen((value) => !value)}
         style={{
           display: 'inline-flex',

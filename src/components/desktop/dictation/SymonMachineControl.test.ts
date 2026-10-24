@@ -39,7 +39,14 @@ vi.mock('framer-motion', () => ({
   useReducedMotion: () => false,
 }));
 
-import { SymonMachineControl, SymonOrbStatusLine, setSymonOrbMinimized } from './SymonMachineControl';
+import {
+  SymonMachineControl,
+  SymonOrbStatusLine,
+  setSymonOrbMinimized,
+  SYMON_OVERLAY_BLUR,
+  SYMON_OVERLAY_TINT,
+  symonOverlaySurfaceStyle,
+} from './SymonMachineControl';
 import { capabilitiesFromToolResult } from './SymonCapabilitiesPanel';
 
 const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -50,6 +57,15 @@ describe('SymonMachineControl', () => {
   let root: Root;
 
   beforeEach(() => {
+    const store = new Map<string, string>();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => { store.set(key, String(value)); },
+        removeItem: (key: string) => { store.delete(key); },
+      },
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -58,6 +74,7 @@ describe('SymonMachineControl', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    setSymonOrbMinimized(false);
     vi.clearAllMocks();
   });
 
@@ -105,6 +122,33 @@ describe('SymonMachineControl', () => {
     await act(async () => starter?.click());
     expect(invoke).toHaveBeenCalledWith('agent_run', { prompt: 'What needs me right now?' });
     expect(container.querySelector('[aria-label="Symon capabilities"]')).toBeNull();
+  });
+
+  it('keeps the native tooltip on the orb button, not the open panel', async () => {
+    await act(async () => root.render(createElement(SymonMachineControl)));
+    await act(async () => {});
+
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
+    expect(trigger?.getAttribute('title')).toBe('This Mac has the Symon session');
+    expect(trigger?.parentElement?.getAttribute('title')).toBeNull();
+
+    await act(async () => trigger?.click());
+    expect(container.querySelector('[aria-label="Symon machine control"]')).not.toBeNull();
+    expect(trigger?.parentElement?.getAttribute('title')).toBeNull();
+    expect(trigger?.getAttribute('title')).toBe('This Mac has the Symon session');
+  });
+
+  it('uses a heavier glass tint and withholds backdrop blur until the overlay is at rest', () => {
+    const entrance = symonOverlaySurfaceStyle({ error: false, settled: false, width: 360 });
+    const rest = symonOverlaySurfaceStyle({ error: false, settled: true, width: 360 });
+    expect(entrance.background).toBe(SYMON_OVERLAY_TINT);
+    expect(rest.background).toBe(SYMON_OVERLAY_TINT);
+    expect(SYMON_OVERLAY_TINT).toContain('color-mix');
+    expect(entrance.backdropFilter).toBe('none');
+    expect(entrance.WebkitBackdropFilter).toBe('none');
+    expect(rest.backdropFilter).toBe(SYMON_OVERLAY_BLUR);
+    expect(rest.WebkitBackdropFilter).toBe(SYMON_OVERLAY_BLUR);
+    expect(SYMON_OVERLAY_BLUR).toMatch(/blur\(/);
   });
 
   it('unwraps the catalog returned by an active remote machine', () => {
