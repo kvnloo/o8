@@ -26,7 +26,7 @@ export async function exerciseMissionIntentAdmission(input: {
   const { assertMissionIntentReceipt } = await import('@/lib/orchestrator/mission-intent-admission');
 
   const base = {
-    repoPath, requestedRuntime: 'codex', huddle: false, dispatchOnCreate: false,
+    repoPath, requestedRuntime: 'codex' as const, huddle: false, dispatchOnCreate: false,
     constraints: 'Record authored identity; no worker launch.',
     issues: [{ number: 91_318_501, title: 'exact authored identity', body: 'Preserve the admission reference.', url: '' }],
   };
