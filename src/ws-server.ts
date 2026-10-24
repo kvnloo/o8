@@ -42,7 +42,7 @@
  *   pong              — LOSSY: keepalive response, loss is harmless.
  */
 
-import { watch, existsSync } from 'node:fs';
+import { watch, existsSync, readFileSync } from 'node:fs';
 import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
@@ -281,6 +281,7 @@ import {
   createDashTmuxSessionSync,
   dashSessionNameForOwnerKey,
 } from './lib/ws-server/dash-terminal-persistence';
+import { composeDashTerminalReveal } from './lib/ws-server/terminal-capture-freshness';
 import { parseGitWorktreeList, shortHome } from './lib/ws-server/git-worktrees';
 import {
   BACKPRESSURE_LIMIT,
@@ -1019,6 +1020,7 @@ interface TerminalAttachment {
   orphanTimer: ReturnType<typeof setTimeout> | null;
   scrollbackChunks: string[];
   scrollbackBytes: number;
+  scrollbackOverflowed: boolean;
   cwd?: string;
   commandHint?: string;
 }
@@ -1044,6 +1046,8 @@ const terminalWorkloadStats = process.env.O8_TERMINAL_BENCH === '1'
 const TERMINAL_BATCH_MS = 16; // batch PTY output every 16ms (60fps)
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
+/** tmux capture for reveal may exceed the in-memory ring after overflow. */
+const TERMINAL_CAPTURE_MAX_BYTES = 2 * 1024 * 1024;
 const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string }>();
 
 // ── Orchestrator channel state ──
@@ -1613,9 +1617,9 @@ function captureTmuxPane(sessionName: string): string {
       ['capture-pane', '-p', '-e', '-S', '-', '-t', sessionName],
       {
         windowsHide: true,
-        timeout: 4000,
+        timeout: 8000,
         encoding: 'utf-8',
-        maxBuffer: TERMINAL_SCROLLBACK_MAX_BYTES,
+        maxBuffer: TERMINAL_CAPTURE_MAX_BYTES,
         stdio: ['ignore', 'pipe', 'ignore'],
         env: sanitizePtyEnv() as NodeJS.ProcessEnv,
       },
@@ -1722,6 +1726,7 @@ function trimScrollback(att: TerminalAttachment) {
     const removed = att.scrollbackChunks.shift() ?? '';
     const removedBytes = Buffer.byteLength(removed, 'utf-8');
     att.scrollbackBytes -= removedBytes;
+    att.scrollbackOverflowed = true;
     terminalWorkloadStats?.recordOverflow(att.sessionName, removedBytes);
   }
 }
@@ -1745,6 +1750,69 @@ function sendTerminalScrollback(client: ClientState, attachment: TerminalAttachm
     channel: 'terminal',
     event: 'data',
     data: { sessionName: attachment.sessionName, data: encoded },
+  }));
+}
+
+/**
+ * #1981 — hidden-view reveal / live re-attach. Prefer a fresh tmux capture
+ * (cursor-addressed TUI rows survive as real lines) over a truncated ring.
+ * Leave the cold-replay capture trim in handleTerminalAttach untouched.
+ */
+function resolveTmuxCaptureText(sessionName: string): string {
+  const overridePath = process.env.O8_TEST_TMUX_CAPTURE_OVERRIDE;
+  if (overridePath && existsSync(overridePath)) {
+    try {
+      return readFileSync(overridePath, 'utf8');
+    } catch {
+      /* live capture */
+    }
+  }
+  return captureTmuxVisiblePane(sessionName);
+}
+
+/** Visible pane only — used for #1981 reveal freshness, not cold history replay. */
+function captureTmuxVisiblePane(sessionName: string): string {
+  try {
+    return execFileSync(
+      resolveTmuxBinary(),
+      ['capture-pane', '-p', '-e', '-t', sessionName],
+      {
+        windowsHide: true,
+        timeout: 4000,
+        encoding: 'utf-8',
+        maxBuffer: TERMINAL_SCROLLBACK_MAX_BYTES,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: sanitizePtyEnv() as NodeJS.ProcessEnv,
+      },
+    );
+  } catch {
+    return '';
+  }
+}
+
+function sendDashTerminalReveal(client: ClientState, attachment: TerminalAttachment) {
+  const scrollback = attachment.scrollbackChunks.join('');
+  const capture = resolveTmuxCaptureText(attachment.sessionName);
+  const reveal = composeDashTerminalReveal(scrollback, capture);
+  sendTerminal(client, 'attached', {
+    sessionName: attachment.sessionName,
+    source: reveal.source,
+    fallbackReason: reveal.fallbackReason,
+    scrollbackBytes: attachment.scrollbackBytes,
+    scrollbackOverflowed: attachment.scrollbackOverflowed,
+  });
+  if (!reveal.payload) return;
+  terminalWorkloadStats?.recordReplay(attachment.sessionName, Buffer.byteLength(reveal.payload, 'utf8'));
+  sendRaw(client, JSON.stringify({
+    channel: 'terminal',
+    event: 'data',
+    data: {
+      sessionName: attachment.sessionName,
+      data: Buffer.from(reveal.payload, 'utf-8').toString('base64'),
+      snapshot: true,
+      source: reveal.source,
+      fallbackReason: reveal.fallbackReason,
+    },
   }));
 }
 
@@ -6297,6 +6365,7 @@ function materializePendingDashSession(
     orphanTimer: null,
     scrollbackChunks: [],
     scrollbackBytes: 0,
+    scrollbackOverflowed: false,
   };
   terminalAttachments.set(sessionName, attachment);
   client.terminalSessions.add(sessionName);
@@ -6384,9 +6453,10 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
     attachment.clientIds.add(client.id);
     terminalWorkloadStats?.recordAttach(sessionName, client.id);
     client.terminalSessions.add(sessionName);
-    sendTerminal(client, 'attached', { sessionName });
     if (attachment.kind === 'dash-shell') {
-      sendTerminalScrollback(client, attachment);
+      sendDashTerminalReveal(client, attachment);
+    } else {
+      sendTerminal(client, 'attached', { sessionName });
     }
     console.log(`[ws-server] Client ${client.id} attached to existing terminal ${sessionName}`);
     return;
@@ -6436,6 +6506,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
         orphanTimer: null,
         scrollbackChunks: [],
         scrollbackBytes: 0,
+        scrollbackOverflowed: false,
       };
       terminalAttachments.set(sessionName, attachment);
       client.terminalSessions.add(sessionName);
@@ -6484,6 +6555,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       orphanTimer: null,
       scrollbackChunks: [],
       scrollbackBytes: 0,
+      scrollbackOverflowed: false,
     };
 
     terminalAttachments.set(sessionName, attachment);
@@ -6913,6 +6985,7 @@ const httpServer = createServer((req, res) => {
           orphanTimer: null,
           scrollbackChunks: [],
           scrollbackBytes: 0,
+          scrollbackOverflowed: false,
           cwd,
           commandHint: shellCommand,
         };
