@@ -6446,8 +6446,11 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       const history = captureTmuxPane(sessionName);
       if (history) {
         const lines = history.replace(/\n+$/, '').split('\n');
-        const keep = lines.length > rows ? lines.slice(0, lines.length - rows).join('\n') : '';
-        if (keep) appendScrollback(attachment, `${keep}\n`);
+        const keep = lines.length > rows ? lines.slice(0, lines.length - rows) : [];
+        // capture-pane is line-oriented (LF), while xterm's production write
+        // path does not enable convertEol. Replay CRLF so each captured row
+        // starts at column zero instead of wrapping away every screenful.
+        if (keep.length > 0) appendScrollback(attachment, `${keep.join('\r\n')}\r\n`);
       }
       sendTerminal(client, 'attached', { sessionName });
       sendTerminalScrollback(client, attachment);

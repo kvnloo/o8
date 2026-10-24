@@ -82,10 +82,10 @@ export function createDashTmuxSessionSync(
         timeout: 3000,
         stdio: 'ignore',
       });
-      // Reused sessions still need #1979 indn disabled (option is not sticky from
-      // a pre-fix create).
+      // Reused sessions still need #1979's xterm scrollback overrides (options
+      // are not sticky from a pre-fix create).
       dependencies.execFileSync(tmuxBin, [
-        'set-option', '-ga', '-t', input.sessionName, 'terminal-overrides', ',xterm*:indn@',
+        'set-option', '-ga', '-t', input.sessionName, 'terminal-overrides', ',xterm*:indn@:smcup@:rmcup@',
       ], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
       recordHealthSafely(dependencies, 'ready', 'session_reused');
       return true;
@@ -103,10 +103,11 @@ export function createDashTmuxSessionSync(
     dependencies.execFileSync(tmuxBin, [
       'set-option', '-t', input.sessionName, 'status', 'off',
     ], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
-    // #1979 — disable tmux `indn` (CSI n S). xterm.js drops lines scrolled
-    // that way; without indn tmux emits line feeds that enter scrollback.
+    // #1979 — disable tmux `indn` (CSI n S) and alternate-screen entry/exit.
+    // xterm.js does not retain alternate-buffer history; these overrides keep
+    // tmux's line-feed fallback in the primary buffer where it enters scrollback.
     dependencies.execFileSync(tmuxBin, [
-      'set-option', '-ga', '-t', input.sessionName, 'terminal-overrides', ',xterm*:indn@',
+      'set-option', '-ga', '-t', input.sessionName, 'terminal-overrides', ',xterm*:indn@:smcup@:rmcup@',
     ], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
     recordHealthSafely(dependencies, 'ready', 'session_created');
     console.log(`[persistent-terminals] created backing session: ${input.sessionName}`);

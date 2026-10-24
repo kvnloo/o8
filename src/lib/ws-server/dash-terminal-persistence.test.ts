@@ -96,12 +96,12 @@ describe('dashboard terminal persistence real fallback path', () => {
     })).toBe(true);
     expect(exec).toHaveBeenCalledTimes(5);
     expect(exec.mock.calls[4]?.[1]).toEqual([
-      'set-option', '-ga', '-t', 'cortex-dash-test', 'terminal-overrides', ',xterm*:indn@',
+      'set-option', '-ga', '-t', 'cortex-dash-test', 'terminal-overrides', ',xterm*:indn@:smcup@:rmcup@',
     ]);
     expect(recordHealth).toHaveBeenCalledWith('ready', 'session_created');
   });
 
-  it('disables indn on reused sessions so pre-fix tmux clients still emit LF', () => {
+  it('applies xterm scrollback overrides to reused pre-fix sessions', () => {
     const recordHealth = vi.fn();
     const exec = vi.fn().mockReturnValue(Buffer.from(''));
 
@@ -112,7 +112,7 @@ describe('dashboard terminal persistence real fallback path', () => {
     })).toBe(true);
     expect(exec).toHaveBeenCalledTimes(2);
     expect(exec.mock.calls[1]?.[1]).toEqual([
-      'set-option', '-ga', '-t', 'cortex-dash-test', 'terminal-overrides', ',xterm*:indn@',
+      'set-option', '-ga', '-t', 'cortex-dash-test', 'terminal-overrides', ',xterm*:indn@:smcup@:rmcup@',
     ]);
     expect(recordHealth).toHaveBeenCalledWith('ready', 'session_reused');
   });
