@@ -6,19 +6,40 @@ import { join } from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IntentContractRef } from '@/lib/orchestrator/aodl-validation';
+import { exerciseMissionIntentAdmission } from './fixtures/aodl-mission-admission';
 
 // Real AODL Python subprocess and real o8 route + store. Only the existing
 // operator principal and isolated data-root boundaries are fixture-controlled.
 const state = vi.hoisted(() => ({
   root: '', role: 'operator', authenticated: true, principalChecks: 0, revokeAt: Infinity,
 }));
-vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.root }));
+vi.mock('@/lib/data-dir-migration', () => ({
+  getDataDir: () => state.root,
+  // Importing the real mission/SQLite store invokes this at module load.
+  // The suite owns an isolated temporary data root; never migrate a host home.
+  migrateDataDirOnce: () => {},
+}));
 vi.mock('@/lib/panel/auth', () => ({
   requirePanelAuth: () => state.authenticated ? null : NextResponse.json({ error: 'unauthorized' }, { status: 401 }),
 }));
 vi.mock('@/lib/auth/principal', () => ({
   resolveRequestPrincipalContext: () => ({ role: ++state.principalChecks >= state.revokeAt ? 'worker' : state.role }),
 }));
+vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/runtimes/shared/auth-detect')>(),
+  assertRuntimeDispatchable: vi.fn(async () => {}),
+}));
+vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
+vi.mock('@/lib/orchestrator/operator-mission-service/mission-routing-log', () => ({
+  logBranchPreparation: () => {}, logDispatchRoutingRecommendations: async () => {},
+}));
+vi.mock('@/lib/operator/defaults', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/operator/defaults')>();
+  return { ...actual, getOperatorDefaultsSync: () => {
+    const defaults = actual.getOperatorDefaultsSync();
+    return { ...defaults, values: { ...defaults.values, subscriptionProfile: 'both', workerExecutionCarrier: null } };
+  } };
+});
 const { POST, GET } = await import('@/app/api/orchestrator/intent-contract/route');
 const { POST: RESOLVE } = await import('@/app/api/orchestrator/intent-contract/resolve/route');
 
@@ -222,4 +243,15 @@ describe('exact authored-intent reference resolution', () => {
     expect(await result.json()).toEqual({ ok: false, error: 'invalid_intent_record' });
     expect(await readFile(storedPath(), 'utf8')).toBe('{');
   });
+});
+
+// This final resource-owning case also reaches the real mission/control-plane store.
+describe('authored identity at mission admission', () => {
+  it('persists the exact creation binding and keeps refusals and retries fail-closed', async () => {
+    const ref = await storedRef();
+    await exerciseMissionIntentAdmission({
+      root: state.root, ref,
+      setRole: (role) => { state.role = role; state.revokeAt = Infinity; state.principalChecks = 0; },
+    });
+  }, 60_000);
 });

@@ -2,7 +2,7 @@ name: Authored intent downstream verification
 
 on:
   pull_request:
-    branches: [integration/o8-upstream-20261003-intent, feat/authored-intent-admission-3185]
+    branches: [integration/o8-upstream-20261003-intent, feat/authored-intent-admission-3185, feat/exact-intent-reference-resolution-3185]
 
 permissions:
   contents: read
@@ -40,7 +40,7 @@ jobs:
           ref: ba9190a6dadcc5ca747c7766b3b53bfc246ce53e
           path: .test-deps/aodl
           persist-credentials: false
-      - name: Real AODL subprocess through persisted and exact-reference routes
+      - name: Real AODL subprocess through persisted, reference and mission routes
         env:
           O8_AODL_SOURCE_DIR: ${{ github.workspace }}/.test-deps/aodl
         run: |
@@ -48,7 +48,7 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
       - name: Touched lint
-        run: npx eslint src/lib/orchestrator/aodl-validation.ts src/lib/orchestrator/intent-contract-store.ts src/lib/orchestrator/intent-reference-resolution.ts src/app/api/orchestrator/intent-contract/route.ts src/app/api/orchestrator/intent-contract/resolve/route.ts src/app/api/orchestrator/intent-contract/route.test.ts tests/aodl-consumer-real-path.test.ts
+        run: npx eslint src/lib/orchestrator/aodl-validation.ts src/lib/orchestrator/intent-contract-store.ts src/lib/orchestrator/intent-reference-resolution.ts src/app/api/orchestrator/intent-contract/route.ts src/app/api/orchestrator/intent-contract/resolve/route.ts src/app/api/orchestrator/intent-contract/route.test.ts tests/aodl-consumer-real-path.test.ts tests/fixtures/aodl-mission-admission.ts src/lib/orchestrator/mission-intent-admission.ts src/lib/orchestrator/operator-mission-service.ts src/lib/orchestrator/operator-mission-service/mission.ts src/app/api/orchestrator/create-mission/route.ts
       - name: Repository rules
         run: npm run rule-check -- --base="$BASE_SHA"
       - name: Hermetic completion gate
