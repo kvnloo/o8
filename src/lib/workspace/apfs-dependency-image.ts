@@ -58,8 +58,7 @@ import {
 import type { DependencyImageOptions } from './dependency-image-options';
 export { captureDependencyImageSourceReceipt, DependencyImageRefusalError } from './dependency-image-source-authority';
 export type { DependencyImageSourceReceipt } from './dependency-image-source-authority';
-export type { DependencyImageOptions } from './dependency-image-options';
-export type { DependencyImageExactGenerationRemountAuthority } from './dependency-image-options';
+export type { DependencyImageOptions, DependencyImageExactGenerationRemountAuthority } from './dependency-image-options';
 export { retireDependencyImage } from './dependency-image-retirement';
 export type { DependencyImageRetirementOptions } from './dependency-image-retirement';
 export type {
@@ -409,6 +408,7 @@ async function publishDependencyImageExclusive(
       continue;
     }
     try {
+      await options.afterStagingClaimed?.(stagingPath);
       await assertCurrentDependencyImageSource(receipt);
       await runHdiCommand([
         // NEVER pass `-quiet` here: it suppresses hdiutil's failure cause on

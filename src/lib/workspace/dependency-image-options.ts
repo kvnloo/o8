@@ -15,6 +15,7 @@ export interface DependencyImageOptions {
   resolveVersion?: DependencyInstallOptions['resolveVersion'];
   publisherWaitMs?: number;
   publisherPollMs?: number;
+  afterStagingClaimed?: (imagePath: string) => Promise<void>;
   afterImageCreated?: (imagePath: string) => Promise<void>;
   afterImageValidated?: (imagePath: string) => Promise<void>;
   beforeImageRecorded?: (imagePath: string) => Promise<void>;

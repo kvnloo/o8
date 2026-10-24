@@ -16,6 +16,7 @@ import {
   publishDependencyImage,
   reconcileDependencyImageLeases,
   retireDependencyImage,
+  type DependencyImageOptions,
   type DependencyImageSourceReceipt,
 } from '@/lib/workspace/apfs-dependency-image';
 import { deriveDependencyInstallRecipe, type DependencyInstallReceipt } from '@/lib/workspace/dependency-install';
@@ -332,6 +333,10 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
   }, 120_000);
 
   it('waits for a live concurrent publisher without retiring its staging authority', async () => {
+    const stagingBoundaryHook: Pick<DependencyImageOptions, 'afterStagingClaimed'> = {
+      afterStagingClaimed: async () => undefined,
+    };
+    expect(stagingBoundaryHook.afterStagingClaimed).toBeTypeOf('function');
     const source = await makeSource('source-concurrent-publish', '2.2.0');
     const modulePath = path.join(process.cwd(), 'src/lib/workspace/apfs-dependency-image.ts');
     const startedPath = path.join(root, 'publisher-started');
@@ -352,7 +357,7 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
         ${JSON.stringify(source.sourceReceipt)},
         {
           registryRoot: ${JSON.stringify(registryRoot)},
-          afterImageCreated: async () => {
+          afterStagingClaimed: async () => {
             await writeFile(${JSON.stringify(startedPath)}, 'ready');
             for (;;) {
               try { await access(${JSON.stringify(releasePath)}); break; }
