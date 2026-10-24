@@ -3973,6 +3973,14 @@
       ]
     },
     {
+      "path": "tests/next-brain-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-diff-review-real-path.test.ts",
       "reasons": [
         "child-process",

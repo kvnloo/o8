@@ -12,6 +12,7 @@ use std::{
 pub enum Tab {
     Session(String),
     Grid,
+    Brain,
     Inbox,
 }
 impl Tab {
@@ -19,6 +20,7 @@ impl Tab {
         match self {
             Self::Session(_) => "Session",
             Self::Grid => "Grid",
+            Self::Brain => "Brain",
             Self::Inbox => "Inbox",
         }
     }
