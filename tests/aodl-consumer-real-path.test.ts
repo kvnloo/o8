@@ -13,7 +13,12 @@ import { exerciseMissionIntentAdmission } from './fixtures/aodl-mission-admissio
 const state = vi.hoisted(() => ({
   root: '', role: 'operator', authenticated: true, principalChecks: 0, revokeAt: Infinity,
 }));
-vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.root }));
+vi.mock('@/lib/data-dir-migration', () => ({
+  getDataDir: () => state.root,
+  // Importing the real mission/SQLite store invokes this at module load.
+  // The suite owns an isolated temporary data root; never migrate a host home.
+  migrateDataDirOnce: () => {},
+}));
 vi.mock('@/lib/panel/auth', () => ({
   requirePanelAuth: () => state.authenticated ? null : NextResponse.json({ error: 'unauthorized' }, { status: 401 }),
 }));
