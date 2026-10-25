@@ -39,6 +39,7 @@ register_surfaces! {
         diff: Diff = "surfaces/diff.rs";
         terminal: Terminal = "surfaces/terminal.rs";
         customize: Customize = "surfaces/customize.rs";
+        setup: Setup = "surfaces/setup.rs";
     }
 }
 
