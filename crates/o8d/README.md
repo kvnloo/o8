@@ -38,11 +38,66 @@ publication during fallback, restart, and oversized-publication fallback.
 These are **bounded replay guarantees**, not a durable journal: history evicted
 from the TS log uses the existing checkpoint/gap protocol. Exact redelivery of
 all transitions beyond that retention window is still outstanding for #4533.
-HTTP forwarding drains for a fixed 100 ms during orderly Rust shutdown; this is
-best effort, and a slow request or abrupt process exit can lose its acknowledgment
-after TS accepts it. Completion-aware draining or idempotent ingress remains to
-be implemented. The Rust frontend does not negotiate permessage-deflate; device
+During orderly producer shutdown, Rust stops accepting and releases the public
+listener before notifying the bridge to start TypeScript fallback. Existing
+HTTP connections drain until they finish, with a five-second shutdown deadline;
+WebSocket input is drained before clients close and reconnect for replay. A real accepted ingress test
+holds a request body across fallback for 400 ms and verifies its 202 response
+and exactly one replayed mutation. Abrupt exit or ingress exceeding the deadline
+can still lose an acknowledgment after TypeScript accepts it; idempotent ingress
+remains outstanding. The Rust frontend does not negotiate permessage-deflate; device
 traffic and legacy channel fan-out still use their TS owners.
+
+Input frames retain their original bytes and are tracked until a backhaul
+ping/pong read barrier confirms receipt by the upstream WebSocket endpoint.
+This confirms receipt, not command execution. Tracking is bounded by 256 frames
+and 1 MiB plus one existing protocol-bounded frame. Shutdown fences a sender's
+already-written frames with a public ping/pong, forwards them, and waits for
+upstream receipt before closing. A four-second receipt window and a 4.5-second
+input collection deadline leave time for individual failures. Cancellation
+hands the socket and every retained original to a separate reporting owner
+through a local queue, without serialization or a network wait. It prepares all
+correlated errors before its first network yield, then batches writes with one
+final flush instead of flushing each failure separately. Failed input awaiting
+reporting is capped at 8,192 frames and 1 MiB plus one protocol-bounded frame;
+the upstream in-flight bound remains 256 frames and 1 MiB.
+
+HTTP connections still expire at five seconds. Reporting owners survive the
+connection-task abort and have at most 250 ms of additional transport grace;
+completed reporting adds no delay. These fences cover completed socket-send callbacks;
+they do not promise delivery of arbitrary application-buffered data.
+
+Unconfirmed delegated plaintext input gets one correlated error with its original
+input and request id. Errors advise checking state before retrying: receipt is
+not an execution guarantee, and input is never replayed automatically. Opaque or
+encrypted clients retain authoritative TypeScript policy closes, or receive an
+explicit protocol close indicating unconfirmed delivery; Rust cannot synthesize
+application errors with TypeScript's E2EE key.
+If collection cannot reach the public fence within its bounds, plaintext clients
+also receive an explicit unconfirmed-delivery close. Local handoff preserves
+the retained outcomes; transport writes must finish within the reporting bound.
+The real executable regression pauses o8d, queues 500 or 5,000 locally successful
+sends, queues producer EOF, and resumes it. Live or exited upstreams require
+every input to be delivered or individually failed. With 5,000 inputs and an
+upstream withholding pongs, every unconfirmed request id must be failed, including
+when the process pauses for 650 ms during reporting to cross the old cancellation
+deadline. The same test holds HTTP ingress unfinished and checks exit before
+the five-second drain deadline plus the 250 ms reporting bound.
+
+## Acceptance audit for #4533
+
+The merged #4538 supplies the off-by-default publish path and 1 MiB pipe bound,
+the four live app parity recordings, real-entry missing/exited-binary fallback,
+and flag-on/off stall, fan-out (1 and 20 clients), and memory measurements.
+Its restart test recovers all 30 retained events, in order, across TypeScript
+fallback and Rust restart. This follow-up replaces the fixed 100 ms ingress
+delay with tracked connection draining while fallback is already available.
+
+The no-loss acceptance item is still partial. Replay beyond the existing
+TypeScript retention window needs a durable journal, and abrupt or overdue
+ingress needs idempotent acknowledgment/retry semantics. Keep #4533 open until
+those guarantees have real-entry evidence. macOS runtime measurements have not
+been collected in the Linux fixture environment.
 
 ## Verification and measurements
 

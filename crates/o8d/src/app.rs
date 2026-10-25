@@ -6,7 +6,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
-    time::timeout,
+    time::{timeout, timeout_at, Instant},
 };
 use tokio_tungstenite::{
     accept_async, connect_async,
@@ -17,21 +17,61 @@ use tokio_tungstenite::{
     },
 };
 
+mod input;
+
 pub async fn serve(
     listener: TcpListener,
     upstream: String,
     key: String,
     bus: Arc<EventBus>,
-    shutdown: tokio::sync::watch::Receiver<bool>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> std::io::Result<()> {
+    let mut connections = tokio::task::JoinSet::new();
+    let mut writers = tokio::task::JoinSet::new();
+    let (reports, mut reports_rx) = tokio::sync::mpsc::unbounded_channel::<input::Report>();
     loop {
-        let (socket, peer) = listener.accept().await?;
-        let (upstream, key, bus) = (upstream.clone(), key.clone(), bus.clone());
-        let shutdown = shutdown.clone();
-        tokio::spawn(async move {
-            let _ = connection(socket, peer.ip().to_string(), upstream, key, bus, shutdown).await;
-        });
+        tokio::select! {
+            _ = shutdown.changed() => break,
+            _ = connections.join_next(), if !connections.is_empty() => {},
+            _ = writers.join_next(), if !writers.is_empty() => {},
+            Some(report) = reports_rx.recv() => { writers.spawn(report.finish()); }
+            accepted = listener.accept() => {
+                let (socket, peer) = accepted?;
+                let (upstream, key, bus) = (upstream.clone(), key.clone(), bus.clone());
+                let shutdown = shutdown.clone();
+                let reports = reports.clone();
+                connections.spawn(async move {
+                    let _ = connection(socket, peer.ip().to_string(), upstream, key, bus, shutdown, reports).await;
+                });
+            }
+        }
     }
+    // Release the public port before announcing fallback. Existing TCP streams
+    // remain alive until their HTTP responses complete; WS tasks observe shutdown.
+    drop(listener);
+    println!("{}", json!({"draining":true}));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let _ = timeout_at(deadline, async {
+        while !connections.is_empty() {
+            tokio::select! {
+                _ = connections.join_next() => {},
+                Some(report) = reports_rx.recv() => { writers.spawn(report.finish()); }
+            }
+        }
+    })
+    .await;
+    // Expire HTTP at five seconds. Aborted WS collectors synchronously hand
+    // off their ledger; their reporting owners are outside this JoinSet.
+    connections.abort_all();
+    while connections.join_next().await.is_some() {}
+    while let Ok(report) = reports_rx.try_recv() {
+        writers.spawn(report.finish());
+    }
+    let _ = timeout_at(deadline + Duration::from_millis(250), async {
+        while writers.join_next().await.is_some() {}
+    })
+    .await;
+    Ok(())
 }
 
 async fn connection(
@@ -41,6 +81,7 @@ async fn connection(
     key: String,
     bus: Arc<EventBus>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
+    reports: input::Reports,
 ) -> Result<(), ()> {
     // Peek leaves the handshake available to tungstenite. HTTP remains a bounded
     // streaming proxy to the original handlers, including authenticated ingress.
@@ -117,11 +158,38 @@ async fn connection(
         }
         Err(_) => return Err(()),
     };
+    // Classify the authenticated backhaul before accepting public input. Only
+    // TS's explicit loopback/operator delegation permits plaintext app errors.
+    let first = timeout(Duration::from_secs(10), backend.next())
+        .await
+        .map_err(|_| ())?
+        .ok_or(())?
+        .map_err(|_| ())?;
+    let control = first
+        .to_text()
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|frame| frame.get("__o8d").cloned())
+        .filter(|control| {
+            control["capabilities"].is_array() && control["subscriptions"].is_array()
+        });
+    let mut delegated = control.is_some();
+    let mut subscriptions = control
+        .as_ref()
+        .and_then(|control| control["subscriptions"].as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut selected = control
+        .as_ref()
+        .and_then(|control| control["capabilities"].as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut socket = accept_async(socket).await.map_err(|_| ())?;
+    if !delegated {
+        send(&mut socket, first).await?;
+    }
+    let mut inputs = input::Inputs::new();
     let mut live = bus.listen();
-    let mut subscriptions = vec![];
-    let mut selected = vec![];
-    let mut delegated = false;
     let mut alive = true;
     let mut heartbeat = tokio::time::interval_at(
         tokio::time::Instant::now() + Duration::from_secs(25),
@@ -130,16 +198,21 @@ async fn connection(
     loop {
         tokio::select! {
             _ = shutdown.changed() => {
-                let _ = send(&mut socket, Message::Close(Some(CloseFrame { code: CloseCode::Away, reason: "server shutting down".into() }))).await;
-                return Ok(());
+                return input::drain(socket, &mut backend, inputs, true, delegated,
+                    Message::Close(Some(CloseFrame { code: CloseCode::Away, reason: "server shutting down".into() })), reports).await;
             }
             _ = heartbeat.tick() => {
-                if !alive { return Ok(()); }
+                if !alive {
+                    return input::drain(socket, &mut backend, inputs, false, delegated,
+                        Message::Close(Some(CloseFrame { code: CloseCode::Away, reason: "heartbeat expired".into() })), reports).await;
+                }
                 alive = false;
                 send(&mut socket, Message::Ping(vec![].into())).await?;
             }
             message = backend.next() => {
-                let Some(Ok(message)) = message else { return Ok(()); };
+                let Some(Ok(message)) = message else {
+                    return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(None), reports).await;
+                };
                 if let Message::Text(raw) = &message {
                     if let Ok(frame) = serde_json::from_str::<Value>(raw) {
                         if let Some(control) = frame.get("__o8d") {
@@ -155,8 +228,8 @@ async fn connection(
                                 let Some((events, latest)) = bus.crossover(&stream, since).await else {
                                     // TS remains the replay authority. Never advance
                                     // over an evicted crossover and claim delivery.
-                                    let _ = send(&mut socket, Message::Close(Some(CloseFrame { code: CloseCode::Again, reason: "reconnect for replay".into() }))).await;
-                                    return Ok(());
+                                    return input::drain(socket, &mut backend, inputs, true, delegated,
+                                        Message::Close(Some(CloseFrame { code: CloseCode::Again, reason: "reconnect for replay".into() })), reports).await;
                                 };
                                 let events = events.into_iter().filter(|event| visible(event, &selected)).collect::<Vec<_>>();
                                 if !events.is_empty() {
@@ -169,9 +242,13 @@ async fn connection(
                     }
                 }
                 match message {
-                    Message::Ping(data) => send(&mut backend, Message::Pong(data)).await?,
-                    Message::Pong(_) => {},
-                    Message::Close(frame) => { let _ = send(&mut socket, Message::Close(frame)).await; return Ok(()); }
+                    Message::Ping(data) => {
+                        if send(&mut backend, Message::Pong(data)).await.is_err() {
+                            return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(None), reports).await;
+                        }
+                    }
+                    Message::Pong(data) => inputs.confirm(&data),
+                    Message::Close(frame) => return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(frame), reports).await,
                     other => send(&mut socket, other).await?,
                 }
             }
@@ -179,8 +256,8 @@ async fn connection(
                 let events = match publication {
                     Ok(events) => events,
                     Err(_) => {
-                        let _ = send(&mut socket, Message::Close(Some(CloseFrame { code: CloseCode::Again, reason: "reconnect for replay".into() }))).await;
-                        return Ok(());
+                        return input::drain(socket, &mut backend, inputs, true, delegated,
+                            Message::Close(Some(CloseFrame { code: CloseCode::Again, reason: "reconnect for replay".into() })), reports).await;
                     }
                 };
                 for subscription in &mut subscriptions {
@@ -194,7 +271,7 @@ async fn connection(
                     }
                 }
             }
-            message = socket.next() => {
+            message = socket.next(), if inputs.has_capacity() => {
                 let Some(Ok(message)) = message else { return Ok(()); };
                 match message {
                     Message::Pong(_) => { alive = true; }
@@ -204,7 +281,11 @@ async fn connection(
                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_| ())?.as_millis() as u64;
                         send(&mut socket, Message::text(json!({"channel":"pong","ts":now}).to_string())).await?;
                     }
-                    other => send(&mut backend, other).await?,
+                    other => {
+                        if inputs.forward(&mut backend, other).await.is_err() {
+                            return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(None), reports).await;
+                        }
+                    }
                 }
             }
         }
