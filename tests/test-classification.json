@@ -4213,6 +4213,14 @@
       ]
     },
     {
+      "path": "tests/next-workers-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/nightly-typecheck-heap-real-path.test.ts",
       "reasons": [
         "child-process",
