@@ -4006,6 +4006,22 @@
       ]
     },
     {
+      "path": "tests/next-issues-account-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/next-issues-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-render-parity.test.ts",
       "reasons": [
         "native-build"
