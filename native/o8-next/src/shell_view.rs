@@ -38,56 +38,75 @@ impl Render for Shell {
             .bg(theme().background)
             .text_color(theme().text)
             .font_family(theme().font_ui)
-            .text_size(px(13.))
+            .font_weight(crate::theme::TYPE.weight)
+            .text_size(px(crate::theme::TYPE.chrome))
+            .line_height(gpui::relative(crate::theme::TYPE.chrome_line))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
+                    .items_center()
+                    .flex_shrink_0()
                     .gap(px(12.))
                     .p(px(8.))
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|_, _, window, _| window.prevent_default()),
                     )
-                    .children(frame.brand)
+                    .children(
+                        frame
+                            .brand
+                            .map(|brand| div().debug_selector(move || brand.into()).child(brand)),
+                    )
                     .children(before_workspaces)
-                    .children(self.workspaces.clone().into_iter().enumerate().map(
-                        |(i, workspace)| {
-                            let label = std::path::Path::new(&workspace)
-                                .file_name()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .to_string();
-                            div()
-                                .id(("workspace", i))
-                                .debug_selector(move || format!("workspace-{i}"))
-                                .cursor_pointer()
-                                .p(px(6.))
-                                .bg(if self.state.selected.as_ref() == Some(&workspace) {
-                                    theme().selection
-                                } else {
-                                    theme().surface_raised
-                                })
-                                .child(label)
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.switch(workspace.clone(), window, cx)
-                                }))
-                        },
-                    ))
+                    .child(
+                        div()
+                            .id("workspace-switcher")
+                            .debug_selector(|| "workspace-switcher".into())
+                            .max_w(px(220.))
+                            .overflow_hidden()
+                            .p(px(6.))
+                            .cursor_pointer()
+                            .child(
+                                self.state
+                                    .selected
+                                    .as_deref()
+                                    .and_then(|path| std::path::Path::new(path).file_name())
+                                    .map(|name| name.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "Workspaces".into()),
+                            )
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.capture(window, cx);
+                                this.palette = true;
+                                this.workspace_picker = true;
+                                this.shortcuts = false;
+                                this.query.clear();
+                                this.choice = 0;
+                                this.palette_scroll.scroll_to_item(1);
+                                this.focus.focus(window);
+                                cx.notify();
+                            })),
+                    )
                     .children(after_workspaces)
                     .child(
                         div()
                             .id("shell-palette")
                             .cursor_pointer()
                             .p(px(6.))
-                            .child(frame.commands)
+                            .child(
+                                div()
+                                    .debug_selector(move || frame.commands.into())
+                                    .child(frame.commands),
+                            )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.capture(window, cx);
                                 this.palette = true;
+                                this.workspace_picker = false;
+                                this.shortcuts = false;
                                 this.query.clear();
                                 this.choice = 0;
+                                this.palette_scroll.scroll_to_item(1);
                                 this.focus.focus(window);
                                 this.revision += 1;
                                 cx.notify();
@@ -112,6 +131,28 @@ impl Render for Shell {
                         .child(self.notice.clone()),
                 )
             })
+            .when(self.shortcuts, |view| {
+                view.child(
+                    div()
+                        .debug_selector(|| "shortcut-reference".into())
+                        .p(px(12.))
+                        .children(
+                            [
+                                "Ctrl+K / Cmd+K: Commands",
+                                "Ctrl+Tab: Next surface",
+                                "Ctrl+W: Close surface",
+                                "Enter: Send",
+                                "Shift+Enter: New line",
+                                "Ctrl+Shift+Enter: Switch send mode",
+                                "F6: Steer queued",
+                                "F7: Remove queued",
+                                "Escape: Close",
+                            ]
+                            .into_iter()
+                            .map(|key| div().p(px(6.)).child(key)),
+                        ),
+                )
+            })
             .when(self.palette, |view| {
                 if let Some(palette) =
                     registry::extensions().find_map(|extension| extension.palette(self, cx))
@@ -124,12 +165,14 @@ impl Render for Shell {
                         .debug_selector(|| "command-palette".into())
                         .max_h(px(300.))
                         .overflow_y_scroll()
+                        .track_scroll(&self.palette_scroll)
                         .p(px(12.))
                         .bg(theme().surface_raised)
                         .child(format!("Commands: {}", self.query))
                         .children(self.commands().into_iter().enumerate().map(|(i, command)| {
                             div()
                                 .id(("command", i))
+                                .debug_selector(move || format!("command-{i}"))
                                 .p(px(6.))
                                 .cursor_pointer()
                                 .bg(if i == self.choice {
@@ -147,7 +190,11 @@ impl Render for Shell {
             .child(
                 div()
                     .flex()
-                    .gap(px(8.))
+                    .h(px(crate::theme::GEOMETRY.header))
+                    .items_center()
+                    .gap(px(crate::theme::GEOMETRY.gap))
+                    .id("surface-tabs")
+                    .overflow_x_scroll()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|_, _, window, _| window.prevent_default()),
@@ -161,14 +208,33 @@ impl Render for Shell {
                             .map(|(i, t)| {
                                 div()
                                     .id(("surface-tab", i))
+                                    .debug_selector(move || format!("surface-tab-{i}"))
                                     .cursor_pointer()
-                                    .p(px(6.))
+                                    .h(px(crate::theme::GEOMETRY.tab_height))
+                                    .px(px(crate::theme::GEOMETRY.gap))
+                                    .flex()
+                                    .items_center()
+                                    .flex_shrink_0()
+                                    .rounded(px(crate::theme::GEOMETRY.tab_radius))
                                     .bg(if active.as_ref() == Some(&t) {
                                         theme().selection
                                     } else {
                                         theme().surface_raised
                                     })
-                                    .child(t.label())
+                                    .child(match &t {
+                                        Tab::Session(id) => {
+                                            let selected = self
+                                                .current()
+                                                .and_then(|w| w.selections.get(id))
+                                                .unwrap_or(id);
+                                            self.sessions
+                                                .iter()
+                                                .find(|s| &s.id == selected)
+                                                .map(|s| s.title.clone())
+                                                .unwrap_or_else(|| "Chat".into())
+                                        }
+                                        _ => t.label().into(),
+                                    })
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.capture(window, cx);
                                         for registration in registrations() {

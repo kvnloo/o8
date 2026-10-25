@@ -14,12 +14,12 @@ fn brain_opens_from_the_real_shell_palette(cx: &mut TestAppContext) {
         )
     });
     ready(&shell, cx);
-    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_keystrokes("b r a i n enter");
     draw(cx);
     assert_eq!(
         shell.read_with(cx, |s, _| s.active().map(|t| t.label())),
-        Some("Brain"),
+        Some("Session"),
         "Brain must be reachable from the opt-in shell's real command entry point"
     );
     assert!(cx.debug_bounds("brain-empty").is_some());
@@ -27,9 +27,13 @@ fn brain_opens_from_the_real_shell_palette(cx: &mut TestAppContext) {
 }
 
 fn brain(shell: &Entity<Shell>, cx: &VisualTestContext) -> Entity<crate::brain::Brain> {
-    shell.read_with(cx, |s, _| {
+    shell.read_with(cx, |s, cx| {
         match s.content.get(&s.key(&s.active().unwrap())).unwrap() {
             Content::Brain(brain) => brain.clone(),
+            Content::Session(session) => session
+                .read(cx)
+                .shell_brain_view()
+                .expect("retained session Brain"),
             _ => panic!("Brain surface"),
         }
     })
@@ -52,7 +56,7 @@ fn settle(brain: &Entity<crate::brain::Brain>, cx: &mut VisualTestContext) {
     panic!("fixture answer must finish");
 }
 fn open_brain(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Entity<crate::brain::Brain> {
-    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_keystrokes("b r a i n enter");
     draw(cx);
     brain(shell, cx)
@@ -226,7 +230,7 @@ fn brain_fixture_errors_cancel_retention_and_workspace_isolation(cx: &mut TestAp
     let initial = shell.read_with(cx, |s, _| s.state.selected.clone().unwrap());
     click("brain-minimize", cx);
     assert!(brain.read_with(cx, |b, _| !b.expanded));
-    click("brain-open", cx);
+    open_brain(&shell, cx);
     assert!(brain.read_with(cx, |b, _| b.expanded));
     cx.simulate_keystrokes("ctrl-e");
     assert!(brain.read_with(cx, |b, _| !b.expanded));

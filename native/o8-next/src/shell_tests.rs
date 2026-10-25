@@ -18,7 +18,7 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     let mut palette = vec![];
     for _ in 0..20 {
         let start = Instant::now();
-        cx.simulate_keystrokes("ctrl-k");
+        cx.simulate_keystrokes("ctrl-shift-p");
         draw(cx);
         palette.push(start.elapsed().as_secs_f64() * 1000.);
         assert!(cx.debug_bounds("command-palette").is_some());
@@ -26,7 +26,7 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
         cx.simulate_keystrokes("escape");
     }
     // Filter and choose a real grid with keyboard events, then return to message input.
-    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_keystrokes("g r i d enter");
     ready(&shell, cx);
     assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Grid));
@@ -42,7 +42,7 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
             _ => panic!("grid"),
         }
     });
-    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_keystrokes("n e w enter");
     ready(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.current().unwrap().composer));
@@ -68,12 +68,11 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
             s.workspaces.iter().position(|w| w == &target).unwrap()
         });
         draw(cx);
+        let switcher = cx.debug_bounds("workspace-switcher").unwrap();
+        cx.simulate_click(switcher.center(), gpui::Modifiers::default());
+        draw(cx);
         let bounds = cx
-            .debug_bounds(if index == 0 {
-                "workspace-0"
-            } else {
-                "workspace-1"
-            })
+            .debug_bounds(if index == 0 { "command-0" } else { "command-1" })
             .unwrap();
         let start = Instant::now();
         cx.simulate_click(bounds.center(), gpui::Modifiers::default());
@@ -210,3 +209,6 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
         && s.notice.contains("Local server unavailable")
         && s.notice.contains("Retry")));
 }
+
+#[path = "shell_look_tests.rs"]
+mod look;

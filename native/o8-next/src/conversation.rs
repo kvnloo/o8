@@ -235,52 +235,64 @@ impl Surface {
         let enabled = self.queue_ready && !self.saving;
         let can_steer = self.queue["canSteer"] == true;
         let mode = if self.send_next || !can_steer {
-            "Queued for after this turn"
+            "Send next"
         } else {
-            "Steers the running turn"
+            "Steer now"
         };
         let queue = self.queue["items"].as_array().cloned().unwrap_or_default();
         let queue = queue
             .into_iter()
             .filter(|item| item["status"] != "applied" && item["status"] != "cancelled");
-        let routing = self
+        let routing: Vec<String> = self
             .routing
             .as_ref()
             .map(|r| {
-                format!(
-                    "Solo · {} · {} · {}",
+                [
+                    "Solo",
                     r["backend"].as_str().unwrap_or(""),
                     r["model"].as_str().unwrap_or(""),
-                    r["permissionMode"].as_str().unwrap_or("")
-                )
+                    r["permissionMode"].as_str().unwrap_or(""),
+                ]
+                .into_iter()
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect()
             })
-            .unwrap_or_else(|| "Waiting for saved session routing…".into());
+            .unwrap_or_default();
         div()
-            .px(px(24.))
-            .py(px(8.))
+            .id("composer-card").debug_selector(|| "composer-card".into())
+            .w_full().max_w(px(crate::theme::GEOMETRY.composer_width)).mx_auto()
+            .rounded(px(crate::theme::GEOMETRY.composer_radius))
+            .border_1().border_color(theme().border)
+            .p(px(crate::theme::GEOMETRY.gap))
             .flex()
             .flex_col()
             .gap(px(8.))
             .child(self.composer.clone())
-            .child(div().text_size(px(9.5)).text_color(theme().text_muted).child("Enter: send · Shift+Enter: new line · Ctrl+Shift+Enter: switch mode · F6: steer queued · F7: remove queued"))
-            .child(
-                div()
-                    .text_size(px(10.))
-                    .text_color(theme().text_muted)
-                    .child(routing),
-            )
             .child(
                 div()
                     .flex()
-                    .gap(px(8.))
+                    .flex_wrap()
+                    .justify_end()
+                    .text_size(px(crate::theme::TYPE.chrome))
+                    .gap(px(crate::theme::GEOMETRY.gap))
+                    .children(routing.into_iter().map(|label| div()
+                        .h(px(crate::theme::GEOMETRY.tab_height))
+                        .px(px(crate::theme::GEOMETRY.gap))
+                        .rounded(px(crate::theme::GEOMETRY.tab_radius))
+                        .text_size(px(crate::theme::TYPE.chrome))
+                        .font_weight(crate::theme::TYPE.weight)
+                        .flex().items_center().child(label)))
                     .child(
                         div()
-                            .id("send-mode").debug_selector(|| "send-mode".into())
+                            .id("send-mode")
+                            .debug_selector(|| "send-mode".into())
                             .px(px(10.))
-                            .py(px(5.))
-                            .rounded(px(7.))
+                            .h(px(crate::theme::GEOMETRY.tab_height))
+                            .flex().items_center()
+                            .rounded(px(crate::theme::GEOMETRY.tab_radius))
                             .cursor_pointer()
-                            .child(div().id("mode-description").debug_selector(move || mode.into()).child(mode))
+                            .child("⌄")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if !this.saving {
                                     this.send_next = !this.send_next;
@@ -292,10 +304,12 @@ impl Surface {
                         div()
                             .id("send")
                             .px(px(10.))
-                            .py(px(5.))
-                            .rounded(px(7.))
+                            .h(px(crate::theme::GEOMETRY.tab_height))
+                            .flex().items_center()
+                            .rounded(px(crate::theme::GEOMETRY.tab_radius))
                             .bg(if enabled { theme().accent } else { theme().surface_raised })
-                            .child(if self.saving { "Saving…" } else { "Send" })
+                            .debug_selector(move || mode.into())
+                            .child(if self.saving { "Saving…" } else { mode })
                             .on_click(cx.listener(|this, _, _, cx| this.send(None, cx))),
                     ),
             )

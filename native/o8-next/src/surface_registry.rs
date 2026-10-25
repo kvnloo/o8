@@ -36,11 +36,11 @@ pub(super) struct Frame {
 impl Default for Frame {
     fn default() -> Self {
         Self {
-            brand: Some("o8 next alpha"),
-            commands: "Commands (Ctrl+K / Cmd+K)",
+            brand: Some("o8"),
+            commands: "Commands",
             status: true,
             retry: true,
-            empty: "Open a saved session or grid from Commands.",
+            empty: "No open surfaces",
         }
     }
 }
@@ -129,6 +129,9 @@ impl Registration {
 pub(super) trait ShellView: Render {
     fn focus(view: &Entity<Self>, composer: bool, window: &mut Window, cx: &mut Context<Shell>);
     fn tick(_view: &Entity<Self>, _refresh: bool, _cx: &mut Context<Shell>) {}
+    fn refresh(view: &Entity<Self>, cx: &mut Context<Shell>) {
+        Self::tick(view, true, cx);
+    }
     #[cfg(test)]
     fn ready(view: &Entity<Self>, cx: &App) -> bool;
 }
@@ -155,6 +158,8 @@ macro_rules! register_surfaces {
             $( $(#[$tab_attr])* $variant $(($payload))?, )*
             $( $(#[$command_attr])* $command_variant, )*
             Message(String),
+            Refresh,
+            Shortcuts,
         }
         impl Command {
             fn registration(&self) -> &'static Registration {
@@ -162,12 +167,15 @@ macro_rules! register_surfaces {
                     $( $(#[$tab_attr])* Self::$variant { .. } => &$module::REGISTRATION, )*
                     $( $(#[$command_attr])* Self::$command_variant => &$command_module::REGISTRATION, )*
                     Self::Message(_) => &session::REGISTRATION,
+                    Self::Refresh | Self::Shortcuts => unreachable!("shell command"),
                 }
             }
             fn label(&self, sessions: &[Session]) -> String {
                 match self {
                     Self::Session(id) => session::label(id, sessions),
                     Self::Message(_) => "New message in selected session".into(),
+                    Self::Refresh => "Refresh".into(),
+                    Self::Shortcuts => "Keyboard shortcuts".into(),
                     _ => self.registration().command_label.into(),
                 }
             }
@@ -182,6 +190,9 @@ macro_rules! register_surfaces {
             }
             fn tick(&self, refresh: bool, cx: &mut Context<Shell>) {
                 match self { $( $(#[$tab_attr])* Self::$variant(view) => <$module::View as ShellView>::tick(view, refresh, cx), )* }
+            }
+            fn refresh(&self, cx: &mut Context<Shell>) {
+                match self { $( $(#[$tab_attr])* Self::$variant(view) => <$module::View as ShellView>::refresh(view, cx), )* }
             }
             #[cfg(test)]
             fn ready(&self, cx: &App) -> bool {

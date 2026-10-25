@@ -53,8 +53,11 @@ pub struct Shell {
     content: HashMap<String, Content>,
     focus: FocusHandle,
     palette: bool,
+    workspace_picker: bool,
+    shortcuts: bool,
     query: String,
     choice: usize,
+    palette_scroll: gpui::ScrollHandle,
     notice: String,
     loading: bool,
     connected: bool,
@@ -82,8 +85,11 @@ impl Shell {
             content: HashMap::new(),
             focus,
             palette: false,
+            workspace_picker: false,
+            shortcuts: false,
             query: String::new(),
             choice: 0,
+            palette_scroll: gpui::ScrollHandle::new(),
             notice: "Connecting to local o8 server…".into(),
             loading: false,
             connected: false,
@@ -160,7 +166,7 @@ impl Shell {
                         } else if !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
                             this.state.selected = this.workspaces.first().cloned();
                         }
-                        this.notice = if this.workspaces.is_empty() { "Connected. No saved workspace sessions." } else { "Connected · Ctrl+K / Cmd+K: commands · Ctrl+Tab: next surface" }.into();
+                        this.notice.clear();
                         this.persist();
                     }
                     Err(error) => {
@@ -300,6 +306,7 @@ impl Shell {
                 .iter()
                 .map(|s| Command::Session(s.id.clone())),
         );
+        commands.extend([Command::Refresh, Command::Shortcuts]);
         commands
             .into_iter()
             .filter(|c| {
@@ -313,6 +320,29 @@ impl Shell {
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
             return;
+        }
+        match command {
+            Command::Refresh => {
+                self.capture(window, cx);
+                if let Some(content) = self
+                    .active()
+                    .and_then(|tab| self.content.get(&self.key(&tab)))
+                {
+                    content.refresh(cx);
+                }
+                self.palette = false;
+                self.load(cx);
+                self.restore_focus(window, cx);
+                return;
+            }
+            Command::Shortcuts => {
+                self.palette = false;
+                self.shortcuts = true;
+                self.focus.focus(window);
+                cx.notify();
+                return;
+            }
+            _ => {}
         }
         let registration = command.registration();
         if registration.overlay_command {
@@ -378,8 +408,13 @@ impl Shell {
                 self.capture(window, cx);
             }
             self.palette = !self.palette;
+            self.workspace_picker = false;
+            self.shortcuts = false;
             self.query.clear();
             self.choice = 0;
+            self.restore_focus(window, cx);
+        } else if self.shortcuts && key == "escape" {
+            self.shortcuts = false;
             self.restore_focus(window, cx);
         } else if self.palette {
             match key {
@@ -450,6 +485,10 @@ impl Shell {
             }
         } else {
             return;
+        }
+        if self.palette {
+            // The palette header is the first child of the scrolling container.
+            self.palette_scroll.scroll_to_item(self.choice + 1);
         }
         self.revision += 1;
         cx.notify();
