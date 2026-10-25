@@ -186,3 +186,34 @@ it('stops checks polling while the Canvas keeps the PR tab mounted but inactive'
   await render(); await settle(); const before = reads().length;
   await settle(30_000); expect(reads()).toHaveLength(before + 1);
 });
+
+it('focuses a native stack layer in the full viewer with its own files', async () => {
+  const stack = { status: 'ready', stale: false, source: 'github-native', revision: 'revision', fetchedAt: '2026-01-01T00:00:00Z', attemptedAt: '2026-01-01T00:00:00Z',
+    snapshot: { id: 70, number: 7, trunk: 'main', layers: [7, 8].map((number, index) => ({ number, title: `Layer ${number}`, state: 'open', headRef: `layer-${number}`, baseRef: index ? 'layer-7' : 'main', headSha: String(index + 1).repeat(40), baseSha: String(index).repeat(40) })) } };
+  fetchMock.mockImplementation(async (url: string) => {
+    if (url === '/api/panel/repos') return Response.json({ repos: [] });
+    const number = Number(url.match(/prs\/(\d+)/)?.[1]);
+    const body = await snapshot(`Layer ${number}`, 'OPEN', number).json();
+    return Response.json({ pr: { ...body.pr, stack, statusCheckRollup: [{ name: 'failed-fixture', status: 'COMPLETED', conclusion: 'FAILURE' }], files: [{ path: `layer-${number}.ts`, additions: 1, deletions: 0 }] } });
+  });
+  await render();
+  expect(host.textContent).toContain('Native GitHub stack #7');
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-stack-layer="8"]')!.click());
+  await settle(); await settle();
+  expect(host.textContent).toContain('layer-8.ts');
+  expect(host.querySelector('[data-stack-layer="8"]')?.getAttribute('aria-current')).toBe('true');
+  expect(reads().at(-1)?.[0]).toContain('/prs/8?repo=org%2Fsample');
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+  });
+  await settle();
+  expect(writes()).toEqual([]);
+  expect(host.querySelector('input[name="reviewComment"]')).toBeNull();
+  expect(host.textContent).toContain('Read-only stack');
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.startsWith('Checks'))!.click());
+  await settle();
+  expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Fix failing checks')).toBeUndefined();
+  await render(1, 'org/sample', 9); await render();
+  expect(host.textContent).toContain('#7 Layer 7');
+});

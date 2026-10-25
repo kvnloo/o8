@@ -3,6 +3,8 @@
 
 import React from 'react';
 import { GithubReadStatus } from '@/components/github/GithubReadStatus';
+import { PrStackSummary } from '../agent-panel/PrStackSummary';
+import { usePrStackSelection } from '../pr-panel/usePrStackSelection';
 import { ExternalLink, RefreshCw } from '../lucide-shims';
 import { LIGHT_CANVAS_VARS } from '../canvas-utils';
 import type { PRViewerProps } from './types';
@@ -16,12 +18,15 @@ import { PRReviewThreadsSection } from './PRReviewThreadsSection';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 
 export function PRViewer({
-  prNumber,
+  prNumber: initialNumber,
   repo,
   active = true,
+  readOnly = false,
   onInjectChatContext,
 }: PRViewerProps) {
-  const data = usePRData(prNumber, repo, onInjectChatContext, active);
+  const selection = usePrStackSelection(repo || '', initialNumber, readOnly);
+  const prNumber = selection.number;
+  const data = usePRData(prNumber, repo, onInjectChatContext, active, selection.readOnly);
 
   if (data.loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading PR...</div>;
@@ -95,7 +100,7 @@ export function PRViewer({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff', ...LIGHT_CANVAS_VARS }}>
       <GithubReadStatus error={data.refreshError} updatedAt={data.updatedAt} />
-      <PRHeader
+      <PRHeader readOnly={data.readOnly}
         pr={data.pr}
         activeSection={data.activeSection}
         setActiveSection={data.setActiveSection}
@@ -108,6 +113,11 @@ export function PRViewer({
         commentInputRef={data.commentInputRef}
       />
 
+      {data.pr.stack ? <div style={{ paddingTop: 8, paddingRight: 20, paddingBottom: 8, paddingLeft: 20 }}>
+        <PrStackSummary observation={data.pr.stack} prNumber={prNumber} repo={repo} retained={data.retainedStack} onSelect={number => {
+          selection.select(number); data.setActiveSection('files');
+        }} />
+      </div> : null}
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20, color: '#374151' }}>
         {data.activeSection === 'overview' ? (
@@ -119,7 +129,7 @@ export function PRViewer({
         ) : null}
 
         {data.activeSection === 'checks' ? (
-          <PRChecksSection
+          <PRChecksSection readOnly={data.readOnly}
             pr={data.pr}
             activeItemIndex={data.activeItemIndex}
             addedContextKeys={data.addedContextKeys}
@@ -148,7 +158,7 @@ export function PRViewer({
         {data.activeSection === 'reviews' ? (
           <PRReviewThreadsSection
             prNumber={prNumber}
-            visibleReviewThreads={data.currentVisibleReviewThreads}
+            visibleReviewThreads={data.readOnly ? data.currentVisibleReviewThreads.map(thread => ({ ...thread, viewerCanReply: false, viewerCanResolve: false, viewerCanUnresolve: false })) : data.currentVisibleReviewThreads}
             reviewsLoading={data.reviewsLoading}
             reviewThreadsError={data.reviewThreadsError}
             activeItemIndex={data.activeItemIndex}
