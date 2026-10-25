@@ -4339,6 +4339,14 @@
       ]
     },
     {
+      "path": "tests/o8d-next-surfaces-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-supervisor-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5853,6 +5861,7 @@
       "path": "tests/server-bundles-packaged-layout-real-path.test.ts",
       "reasons": [
         "child-process",
+        "native-build",
         "network-listener",
         "process-signal",
         "real-path",
