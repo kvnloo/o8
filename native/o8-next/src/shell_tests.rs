@@ -46,8 +46,8 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("n e w enter");
     ready(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.current().unwrap().composer));
-    // Palette captures commands even while the existing editor has focus.
-    cx.simulate_keystrokes("ctrl-k");
+    // The explicit global palette chord works while the editor has focus.
+    cx.simulate_keystrokes("ctrl-shift-p");
     assert!(shell.read_with(cx, |s, _| s.palette));
     cx.simulate_keystrokes("escape");
     let other = shell.read_with(cx, |s, _| {
@@ -181,13 +181,15 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
         restarted.read_with(restart_cx, |s, _| s.active()),
         Some(Tab::Session(_))
     ));
-    for query in ["d i f f", "t e r m i n a l"] {
-        restart_cx.simulate_keystrokes("ctrl-k");
+    for (query, label) in [("d i f f", "Diff"), ("t e r m i n a l", "Terminal")] {
+        restart_cx.simulate_keystrokes("ctrl-shift-p");
         restart_cx.simulate_keystrokes(query);
         restart_cx.simulate_keystrokes("enter");
-        assert!(restarted.read_with(restart_cx, |s, _| {
-            s.notice.contains("not available in this build")
-        }));
+        ready(&restarted, restart_cx);
+        assert_eq!(
+            restarted.read_with(restart_cx, |s, _| s.active().unwrap().label()),
+            label
+        );
     }
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
