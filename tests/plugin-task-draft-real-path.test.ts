@@ -421,6 +421,59 @@ describe('plugin task drafts through the actual authenticated route and persiste
     expect(readTaskDraft(key)).toBeNull();
   });
 
+  it('asks for project and objective before any workspace snapshot and keeps source guidance aligned', async () => {
+    const before = readOrchestratorMissionState();
+    const listed = await call('o8_task_options', { machineId: 'draft-machine' });
+    expect(listed.result).toMatchObject({ selectionRequired: true, nextAction: 'ask_user',
+      clarification: { required: ['project', 'objective'] }, executionEnabled: false });
+    expect(listed.result.clarification.question).toMatch(/which.*project.*what/i);
+    expect(listed.result).not.toHaveProperty('snapshotId');
+    const snapshots = join(taskDraftRoot(), 'snapshots');
+    expect(existsSync(snapshots) ? readdirSync(snapshots) : []).toHaveLength(0);
+    expect(intents()).toHaveLength(0);
+    expect(readOrchestratorMissionState()).toEqual(before);
+    expect(await runHeadlessSprintTick()).toMatchObject({ launched: 0 });
+
+    const optionsTool = TASK_DRAFT_TOOLS.find((tool) => tool.name === 'o8_task_options')!;
+    expect(optionsTool.title).toMatch(/^List/u);
+    expect(optionsTool.description).toContain('project and objective');
+    const skill = readFileSync(join(process.cwd(), 'plugins/o8/skills/connected-o8/SKILL.md'), 'utf8');
+    expect(skill).toContain('before selecting IDs or preparing a task');
+    expect(skill).toContain('Do not silently try another registration after a refused snapshot');
+    expect(skill).toContain('user does not need to provide JSON');
+    const manifest = JSON.parse(readFileSync(join(process.cwd(), 'plugins/o8/plugin.json'), 'utf8'));
+    const metadata = Object.values(manifest.extensions as Record<string, {
+      interface: { longDescription: string };
+      review: { test_cases: { positive: Array<{ tools_triggered: string; expected_behavior: string }> } };
+    }>)[0];
+    expect(metadata.interface.longDescription).toContain('Ask for missing project and objective before selecting a workspace');
+    const reviewCase = metadata.review.test_cases.positive.find((entry: { tools_triggered: string }) => entry.tools_triggered.includes('o8_prepare_task'));
+    expect(reviewCase!.expected_behavior).toContain('Ask for missing project and objective before selecting IDs');
+
+    // Model-independent source proof: only an explicit named choice proceeds.
+    const choice = listed.result.choices.find((entry: { project: string }) => entry.project === projectName);
+    const selected = await call('o8_task_options', { machineId: 'draft-machine', repoId: choice.repoId, projectId: choice.projectId });
+    const args = contract(selected.result.snapshotId);
+    const prepared = await call('o8_prepare_task', args);
+    expect(prepared.result).toMatchObject({ ok: true, state: 'held', dispatched: false });
+    expect(listTaskDrafts(accountId)).toHaveLength(1);
+    expect(listTaskDrafts(accountId)[0].contract).toMatchObject({ projectId, allowedFiles: ['README.md'],
+      runtime: args.runtime, model: args.model, effort: args.effort });
+    expect(launches).not.toHaveBeenCalled();
+  });
+
+  it('reports a refused selected workspace and asks for direction without selecting another registration', async () => {
+    const capture = vi.spyOn(workspace, 'captureTaskDraftWorkspace');
+    writeFileSync(join(repo, 'README.md'), 'Uncommitted fixture change.\n');
+    const refused = await call('o8_task_options', { machineId: 'draft-machine', repoId, projectId });
+    expect(refused.status).toBe(409);
+    expect(refused.result).toMatchObject({ ok: false, code: 'workspace_not_clean', nextAction: 'ask_user', selectionRequired: true });
+    expect(refused.result.message).toContain('Do not try another registration');
+    expect(capture).toHaveBeenCalledExactlyOnceWith(repoId, projectId);
+    expect(intents()).toHaveLength(0);
+    expect(launches).not.toHaveBeenCalled();
+  });
+
   it('requires relay account binding for draft grants and caps local credentials to OAuth expiry', () => {
     expect(parsePluginRelayGrant({ clientId: 'draft-client', scopes: [PLUGIN_PREPARE_TASK_SCOPE], expiresAt: Date.now() + 60000 })).toBeNull();
     const expiry = Date.now() + 1000;
