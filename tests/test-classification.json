@@ -1226,6 +1226,12 @@
       ]
     },
     {
+      "path": "src/lib/workspace/manifest/service-process-recovery.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/lib/workspace/mutation-materialization-guard.test.ts",
       "reasons": [
         "apfs-tool",
@@ -6601,6 +6607,7 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "process-signal",
         "real-path",
         "worktree-api"
       ]
@@ -6663,6 +6670,18 @@
         "executable-fixture",
         "git-cli",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/workspace-services-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "terminal-tool",
+        "worktree-api"
       ]
     },
     {
