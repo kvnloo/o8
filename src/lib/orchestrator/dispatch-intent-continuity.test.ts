@@ -96,12 +96,13 @@ async function arrange(caseId: string) {
   state.missionId = 'mission-' + caseId;
   state.repoPath = repoPath;
   state.packets = [packet];
-  state.creationReceipt = {
+  const creationReceipt = {
     missionId: state.missionId,
     packets: [{ id: packet.id, title: packet.title, wave: 1 }],
     branchPreparation: [],
     authoredIntentRef: ref,
   };
+  state.creationReceipt = creationReceipt;
   writeOrchestratorControlPlaneState(state);
   return { packet, state, repoPath, sourceFile, original, document, ref };
 }
@@ -132,18 +133,20 @@ describe('orchestrator to worker intent continuity (upstream acceptance case 1)'
 
     // A damaged admitted ref must stay explicitly unavailable, not become a
     // requirements-free summary or an inferred authorization.
-    setup.state.creationReceipt = {
+    const malformedReceipt = {
       ...setup.state.creationReceipt!,
       authoredIntentRef: { ...setup.ref, inputSha256: 'malformed' },
     };
+    setup.state.creationReceipt = malformedReceipt;
     writeOrchestratorControlPlaneState(setup.state);
     const malformed = continuityFromPrompt(await buildPacketPrompt(setup.packet, [setup.packet], 'main', setup.repoPath));
     expect(malformed.intent).toMatchObject({ status: 'unavailable', ref: null, document: null, reason: 'malformed_intent_ref' });
 
-    setup.state.creationReceipt = {
+    const restoredReceipt = {
       ...setup.state.creationReceipt!,
       authoredIntentRef: setup.ref,
     };
+    setup.state.creationReceipt = restoredReceipt;
     writeOrchestratorControlPlaneState(setup.state);
     const missing = { ...setup.packet, readBudget: { requiredReads: ['src/missing.ts'], minToolCalls: 1, planBeforeWrite: true } };
     const absent = continuityFromPrompt(await buildPacketPrompt(missing, [missing], 'main', setup.repoPath));
