@@ -205,18 +205,25 @@ export async function checkSourceEvidenceFreshness(
   carried: WorkerWorkspaceEvidence,
   workspacePath: string | null | undefined,
 ): Promise<SourceFreshness> {
-  if (carried.status !== 'observed' || carried.truncated || carried.files.length === 0) {
+  if (!carried || !Array.isArray(carried.files)) {
+    return { status: 'unavailable', stalePaths: [], unavailablePaths: ['(malformed_source_evidence)'] };
+  }
+  if (carried.status !== 'observed' || carried.truncated !== false || carried.files.length === 0
+    || carried.files.length > MAX_RELEVANT_FILES) {
     return {
       status: 'unavailable',
       stalePaths: [],
-      unavailablePaths: carried.files.length ? carried.files.map((file) => file.path) : ['(no_source_evidence)'],
+      unavailablePaths: carried.files.length
+        ? carried.files.map((file) => typeof file?.path === 'string' ? file.path : '(malformed_source_evidence)')
+        : ['(no_source_evidence)'],
     };
   }
   const stalePaths: string[] = [];
   const unavailablePaths: string[] = [];
   for (const file of carried.files) {
-    if (file.status !== 'observed' || !/^[a-f0-9]{64}$/.test(file.sha256 ?? '')) {
-      unavailablePaths.push(file.path);
+    if (!file || typeof file.path !== 'string' || file.status !== 'observed'
+      || !/^[a-f0-9]{64}$/.test(file.sha256 ?? '')) {
+      unavailablePaths.push(typeof file?.path === 'string' ? file.path : '(malformed_source_evidence)');
       continue;
     }
     const observed = (await observeFile(workspacePath, file.path)).evidence;
@@ -238,7 +245,16 @@ export async function reobserveSourceEvidence(
   evidence: WorkerWorkspaceEvidence;
   observations: Array<{ path: string; content: string }>;
 }> {
-  const observed = await Promise.all(carried.files.map((file) => observeFile(workspacePath, file.path)));
+  if (!carried || !Array.isArray(carried.files) || carried.files.length > MAX_RELEVANT_FILES) {
+    return {
+      evidence: { status: 'unavailable', files: [], truncated: true },
+      observations: [],
+    };
+  }
+  const observed = await Promise.all(carried.files.map((file) => observeFile(
+    workspacePath,
+    typeof file?.path === 'string' ? file.path : '',
+  )));
   const files = observed.map((entry) => entry.evidence);
   return {
     evidence: {
