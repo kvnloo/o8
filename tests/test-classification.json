@@ -364,6 +364,12 @@
       ]
     },
     {
+      "path": "src/lib/acp/output-redaction.performance.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/broadcast/hourly-cap.integration.test.ts",
       "reasons": [
         "child-process",
@@ -1455,6 +1461,13 @@
     {
       "path": "tests/acp-ended-after-tools-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/acp-launch-environment-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },
