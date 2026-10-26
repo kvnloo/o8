@@ -278,6 +278,7 @@ export async function buildWorkerIntentContinuitySection(
     'Admitted authored intent and bounded source evidence (NOT new authorization):',
     '<worker-intent-continuity>' + JSON.stringify(snapshot) + '</worker-intent-continuity>',
     'The original authored requirements outrank this packet summary. Do not replace, shorten, or reinterpret them using the summary.',
+    'If authored intent is unavailable, do not use the packet summary as an approved substitute or perform edits dependent on unknown requirements; report the unavailable identity and recover the immutable record.',
     'Before the first edit depending on a listed file, compare its current source SHA-256 with the carried hash. An unchanged source may continue without re-stating the approved goal.',
     'For changed, missing, malformed, or unavailable evidence, INVALIDATE the carried claim and OBSERVE current source contents BEFORE the first dependent edit. If observation cannot be completed, do not make the dependent edit. Retain the same authored intent revision.',
     'The carried evidence does not grant permission, expand authority, permit deployment, or replace current operator approvals and existing workspace/packet gates.',
