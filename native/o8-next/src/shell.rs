@@ -294,7 +294,10 @@ impl Shell {
             (registration.capture)(self, window, cx);
         }
     }
-    fn commands(&self) -> Vec<Command> {
+    fn commands(&self) -> Vec<palette::Entry> {
+        palette::entries(self)
+    }
+    fn surface_commands(&self) -> Vec<Command> {
         let mut entries = registrations()
             .iter()
             .filter_map(|r| r.command)
@@ -442,7 +445,7 @@ impl Shell {
                 }
                 "enter" => {
                     if let Some(command) = self.commands().get(self.choice).cloned() {
-                        self.execute(command, window, cx);
+                        command.run(self, window, cx);
                     }
                 }
                 "backspace" => {
@@ -525,10 +528,10 @@ impl Shell {
         }
     }
 }
-#[path = "shell_view.rs"]
-mod view;
 #[path = "shell_material.rs"]
 mod material;
+#[path = "shell_view.rs"]
+mod view;
 pub use view::try_launch;
 
 #[cfg(test)]
