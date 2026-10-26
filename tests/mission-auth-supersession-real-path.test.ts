@@ -143,11 +143,13 @@ describe('mission supersession during bound operator revocation (real persistenc
     const seedResponse = await request('auth-race-seed');
     expect(seedResponse.status).toBe(201);
     const seedId = (await seedResponse.json()).result.missionId as string;
-    expect(readOrchestratorControlPlaneState().missionId).toBe(seedId);
+    const originalCurrent = structuredClone(readOrchestratorControlPlaneState());
+    expect(originalCurrent.missionId).toBe(seedId);
     const seedRegistry = registry.readMissionRegistryEntry(seedId, { includeArchived: true });
     expect(seedRegistry?.mission.packets).toHaveLength(1);
     expect(seedRegistry?.mission.packets[0].queueState).toBe('held');
-    expect(seedRegistry?.mission.packets[0].blockedReason ?? null).toBeNull();
+    expect(seedRegistry?.mission.packets[0].blockedReason).toBe('Awaiting explicit dispatch');
+    const originalRegistryPacket = structuredClone(seedRegistry!.mission.packets[0]);
     const beforeIds = registry.listMissionRegistryEntries({ includeArchived: true })
       .map((entry) => entry.id).sort();
 
@@ -182,10 +184,10 @@ describe('mission supersession during bound operator revocation (real persistenc
 
       // Response rejection is insufficient: both durable stores must still
       // describe the authorized seed, and no successor may be admitted.
-      expect(readOrchestratorControlPlaneState().missionId).toBe(seedId);
+      expect(readOrchestratorControlPlaneState()).toEqual(originalCurrent);
       const registryAfter = registry.readMissionRegistryEntry(seedId, { includeArchived: true });
       expect(registryAfter?.mission.packets[0].operatorStopped ?? false).toBe(false);
-      expect(registryAfter?.mission.packets[0].blockedReason ?? null).toBeNull();
+      expect(registryAfter?.mission.packets[0]).toEqual(originalRegistryPacket);
       expect(registryAfter?.mission.packets[0].queueState).toBe('held');
       expect(registry.listMissionRegistryEntries({ includeArchived: true })
         .map((entry) => entry.id).sort()).toEqual(beforeIds);
