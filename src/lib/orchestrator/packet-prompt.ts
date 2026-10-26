@@ -12,6 +12,7 @@ import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-
 import { readPacketAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { buildPacketSpecPromptSection } from '@/lib/orchestrator/packet-spec';
+import { buildWorkerIntentContinuitySection } from '@/lib/orchestrator/dispatch-intent-continuity';
 import {
   buildPacketTaskContractInstructions,
   buildSealedPacketTaskContractInstructions,
@@ -362,6 +363,10 @@ export async function buildPacketPrompt(
   const edgeCaseSections = renderEdgeCaseSections(packet.edgeCaseSites);
   const sandboxVerificationSections = buildSandboxVerificationSections(packet);
   const implementationNotesPath = packetImplementationNotesPath(packet.id);
+  const intentContinuitySection = await buildWorkerIntentContinuitySection(
+    packet,
+    worktreePath ?? packet.lane?.worktreePath ?? packet.workspaceTargetPath,
+  );
   const taskContractSections = packet.taskContract
     ? buildSealedPacketTaskContractInstructions(packet.taskContract, implementationNotesPath)
     : packet.taskContractRequired
@@ -487,6 +492,7 @@ export async function buildPacketPrompt(
     // reads before the task itself.
     sessionRulesSection,
     ...claudeCodeSkillSections,
+    intentContinuitySection,
     `Packet: ${packet.title}`,
     packet.summary ? `Summary: ${packet.summary}` : null,
     livePacketSpec,
