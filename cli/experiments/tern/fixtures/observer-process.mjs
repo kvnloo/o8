@@ -22,7 +22,7 @@ class Terminal extends EventEmitter {
   constructor(mode) {
     super();
     this.output = { isTTY: true, columns: 100, write: bytes => {
-      const text = String(bytes);
+      const text = typeof bytes === 'string' ? bytes : new TextDecoder().decode(bytes);
       this.chunks.push(text);
       if (text.includes(`${APC}q;`)) queueMicrotask(() => {
         if (mode === 'signal') {

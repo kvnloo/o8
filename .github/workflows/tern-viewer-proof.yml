@@ -34,6 +34,11 @@ jobs:
           TERN_REQUIRE_SDK: '1'
         run: npm --prefix cli/experiments/tern test
       - run: npm run typecheck
+      - run: npx tsc --noEmit
+      - name: Offline contract expiry regressions
+        run: |
+          npx vitest run --config config/vitest/vitest.unit.config.ts tests/pi-sdk-live-contract.test.ts
+          npx eslint tests/pi-sdk-live-contract.test.ts
       - run: npm run protocol:check
       - run: npm run test:classification:check
       - name: Touched-file lint and rules
