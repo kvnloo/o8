@@ -1,7 +1,7 @@
 name: Tern viewer ownership proof
 on:
-  push:
-    branches: ['test/3365-tern-viewer-isolation']
+  pull_request:
+    branches: ['feat/3365-tern-readonly-lab']
   workflow_dispatch:
 permissions:
   contents: read
@@ -15,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - uses: actions/setup-node@v4
@@ -23,6 +24,8 @@ jobs:
           cache: npm
       - run: npm install -g npm@11
       - run: npm ci --prefer-offline
+      - name: Workflow policy
+        run: npx vitest run --config config/vitest/vitest.unit.config.ts tests/workflow-policy.test.ts
       - name: Install isolated SDK and build existing S2 model
         run: |
           npm --prefix cli/experiments/tern install --ignore-scripts --no-audit --no-fund
