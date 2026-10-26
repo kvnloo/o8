@@ -15,7 +15,6 @@ import { listArtifacts, toArtifactRef } from '@/lib/artifacts/store';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { archiveMissionsExcept, getMissionRecord, recordMission } from '@/lib/db/missions-store';
 import {
-  persistMissionRegistryStateIfVersion,
   readMissionRegistryEntry,
   withMissionRegistryState,
 } from '@/lib/orchestrator/mission-registry';
@@ -28,16 +27,12 @@ import { assertExecutionCarrierCompatible, isExecutionCarrierId } from '@/lib/ru
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { prepareMissionBranches } from './branch-cleanup';
-import {
-  cancelSupersededMissionPackets,
-  cancelSupersededRegistryMissions,
-} from './mission-supersession';
+import { persistCreatedMission } from './mission-supersession';
 import {
   activityLabel,
   latestIsoTimestamp,
   readTranscriptActivityBySession,
 } from './mission-status-transcript';
-import { recordOutgoingMissionSnapshot } from './mission-handoff';
 import { logBranchPreparation, logDispatchRoutingRecommendations } from './mission-routing-log';
 import { preparePacketsForExplicitDispatch, summarizeDispatchMission } from './dispatch-runtime-override';
 import { resolveRuntimePresetModel } from './runtime-preset-routing';
@@ -309,60 +304,15 @@ export async function createMission(input: CreateMissionInput & AuthoredMissionI
   const supersedingThreadId = input.orchestratorThreadId?.trim() ?? '';
   const supersededAt = new Date().toISOString();
 
-  const persisted = await withMissionHandoffBarrier(async () => {
-    const { state, result: outgoing } = await withLockedState(
-      async (current) => {
-        intentAdmission.assertAuthorized();
-        if (supersedingThreadId) {
-          cancelSupersededMissionPackets(current, {
-            threadId: supersedingThreadId,
-            successorMissionId: missionId,
-            cancelledAt: supersededAt,
-          });
-          // Keep the current control-plane lock while older registry rows are
-          // cancelled. A current or non-current dispatch must finish first and
-          // count as in-flight, or observe the durable cancellation before it
-          // can create a lane. This closes the switch-then-cancel launch gap.
-          await cancelSupersededRegistryMissions({
-            threadId: supersedingThreadId,
-            successorMissionId: missionId,
-            cancelledAt: supersededAt,
-          });
-        }
-        // Replace the mission under the control-plane lock so a concurrent
-        // headless tick cannot restore a stale mission after createMission returns.
-        if (current.missionId && current.missionId !== missionId) {
-          const registryEntry = readMissionRegistryEntry(current.missionId, { includeArchived: true });
-          const snapshot = structuredClone(current);
-          if (!registryEntry) {
-            // The outgoing current file is authoritative even when an earlier
-            // best-effort mission insert failed. Insert its exact snapshot
-            // before swapping the file so its live packets remain addressable.
-            // Any insert failure aborts the switch while the old current file
-            // is still intact.
-            recordOutgoingMissionSnapshot(snapshot);
-          }
-          Object.assign(current, mission);
-          return registryEntry
-            ? { mission: snapshot, registryVersion: registryEntry.updatedAt }
-            : null;
-        }
-        Object.assign(current, mission);
-        return null;
-      },
-      { waitTimeoutMs: MISSION_CREATE_LOCK_WAIT_MS },
-    );
-    if (outgoing) {
-      const persistedOutgoing = await persistMissionRegistryStateIfVersion(
-        outgoing.mission,
-        outgoing.registryVersion,
-      );
-      if (!persistedOutgoing) {
-        log(`Outgoing mission ${outgoing.mission.missionId} advanced during mission switch; its newer registry state was preserved.`);
-      }
-    }
-    return state;
-  });
+  const persisted = await withMissionHandoffBarrier(() => persistCreatedMission({
+    mission,
+    supersedingThreadId,
+    supersededAt,
+    assertAuthorized: intentAdmission.assertAuthorized,
+    bound: Boolean(intentAdmission.receiptFields.authoredIntentRef),
+    waitTimeoutMs: MISSION_CREATE_LOCK_WAIT_MS,
+    log,
+  }));
   log(`Created mission ${missionId} with ${persisted.packets.length} packets.`);
   logBranchPreparation(branchPreparation, missionId);
 
