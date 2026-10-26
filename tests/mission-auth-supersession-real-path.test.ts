@@ -98,6 +98,37 @@ afterAll(async () => {
   else process.env.CORTEX_IDE_DB_PATH = previousDbPath;
 });
 
+
+async function setupBoundSupersessionCase(tag: string, thread: string, issueNumber: number) {
+  const { POST: publishIntent } = await import('@/app/api/orchestrator/intent-contract/route');
+  const { POST: createMission } = await import('@/app/api/orchestrator/create-mission/route');
+  principal.role = 'operator';
+  const doc = JSON.stringify({
+    specVersion: '0.2', graphId: 'mission-auth-' + tag, revision: 0,
+    intentGraph: { nodes: [{ id: 'task', kind: 'task', ports: [], capabilities: ['read', 'execute'] }], edges: [] },
+    policies: { kinds: [] },
+    constraints: { budgets: { tokens: 100 }, termination: { on: 'verified' } },
+    provenance: { sourceHash: '0'.repeat(64) },
+  });
+  const published = await publishIntent(new NextRequest(intentUrl, { method: 'POST', body: doc }));
+  expect(published.status).toBe(200);
+  const ref = (await published.json()).record.ref;
+  const request = (id: string, bound: boolean) => createMission(new NextRequest(missionUrl, {
+    method: 'POST',
+    body: JSON.stringify({
+      repoPath, requestedRuntime: 'codex', huddle: false,
+      dispatchOnCreate: false, orchestratorThreadId: thread,
+      clientMutationId: id, constraints: 'Authorization lock-boundary proof.',
+      ...(bound ? { authoredIntentRef: ref } : {}),
+      issues: [{ number: issueNumber, title: 'lock boundary packet', body: 'Held, no worker launch.', url: '' }],
+    }),
+  }));
+  const seed = await request(tag + '-seed', false);
+  expect(seed.status).toBe(201);
+  const seedId = (await seed.json()).result.missionId as string;
+  return { seedId, request };
+}
+
 describe('mission supersession during bound operator revocation (real persistence)', () => {
   it('does not replace the mission or cancel its registry packets after access is revoked', async () => {
     const { POST: publishIntent } = await import('@/app/api/orchestrator/intent-contract/route');
@@ -266,5 +297,105 @@ describe('mission supersession during bound operator revocation (real persistenc
       'SELECT mission_state_json, updated_at, archived_at FROM missions WHERE id = ?',
     ).get(seedId)).toEqual(cancelledRawRow);
     expect(readOrchestratorControlPlaneState().missionId).toBe(successorId);
+  }, 60_000);
+
+  it('revocation while waiting for the control-plane lock does not alter either persisted store', async () => {
+    const control = await import('@/lib/orchestrator/control-plane');
+    const registry = await import('@/lib/orchestrator/mission-registry');
+    const { getSqlite } = await import('@/lib/db');
+    const { seedId, request } = await setupBoundSupersessionCase(
+      'control-lock', 'auth-supersession-control-lock', 91_318_504,
+    );
+    const initialFile = readFileSync(join(principal.root, 'orchestrator-state.json'), 'utf8');
+    const seedRow = getSqlite().prepare(
+      'SELECT mission_state_json, updated_at, archived_at FROM missions WHERE id = ?',
+    ).get(seedId);
+    const initialIds = registry.listMissionRegistryEntries({ includeArchived: true })
+      .map((entry) => entry.id).sort();
+    const lockHeld = deferred();
+    const releaseLock = deferred();
+    const enteringLock = deferred();
+    const originalWithLock = control.withControlPlaneLock;
+    const holder = originalWithLock(async () => {
+      lockHeld.resolve();
+      await releaseLock.promise;
+    });
+    await lockHeld.promise;
+    const spy = vi.spyOn(control, 'withControlPlaneLock').mockImplementation((fn, options) => {
+      enteringLock.resolve();
+      return originalWithLock(fn, options);
+    });
+    try {
+      const pending = request('auth-control-lock-successor', true);
+      await enteringLock.promise;
+      principal.role = 'worker';
+      releaseLock.resolve();
+      const denied = await pending;
+      expect(denied.status).toBe(403);
+      expect((await denied.json()).error.code).toBe('operator_required');
+      expect(readFileSync(join(principal.root, 'orchestrator-state.json'), 'utf8')).toBe(initialFile);
+      expect(getSqlite().prepare(
+        'SELECT mission_state_json, updated_at, archived_at FROM missions WHERE id = ?',
+      ).get(seedId)).toEqual(seedRow);
+      expect(registry.listMissionRegistryEntries({ includeArchived: true })
+        .map((entry) => entry.id).sort()).toEqual(initialIds);
+    } finally {
+      releaseLock.resolve();
+      await holder;
+      spy.mockRestore();
+      principal.role = 'operator';
+    }
+  }, 60_000);
+
+  it('revocation while waiting for the real SQLite registry lock preserves the seed and creates no successor', async () => {
+    const control = await import('@/lib/orchestrator/control-plane');
+    const registry = await import('@/lib/orchestrator/mission-registry');
+    const { getSqlite } = await import('@/lib/db');
+    const { seedId, request } = await setupBoundSupersessionCase(
+      'registry-lock', 'auth-supersession-registry-lock', 91_318_505,
+    );
+    const initialFile = readFileSync(join(principal.root, 'orchestrator-state.json'), 'utf8');
+    const initialIds = registry.listMissionRegistryEntries({ includeArchived: true })
+      .map((entry) => entry.id).sort();
+    const lockHeld = deferred();
+    const releaseLock = deferred();
+    const enteringBatch = deferred();
+    const holder = registry.withMissionRegistryState(seedId, async (state) => {
+      lockHeld.resolve();
+      await releaseLock.promise;
+      return { state, result: undefined };
+    });
+    await lockHeld.promise;
+    const originalBatch = registry.withAtomicMissionRegistryBatch;
+    const spy = vi.spyOn(registry, 'withAtomicMissionRegistryBatch').mockImplementation((ids, mutate) => {
+      enteringBatch.resolve();
+      return originalBatch(ids, mutate);
+    });
+    try {
+      const pending = request('auth-registry-lock-successor', true);
+      await enteringBatch.promise;
+      principal.role = 'worker';
+      releaseLock.resolve();
+      const denied = await pending;
+      expect(denied.status).toBe(403);
+      expect((await denied.json()).error.code).toBe('operator_required');
+      await holder;
+      expect(readFileSync(join(principal.root, 'orchestrator-state.json'), 'utf8')).toBe(initialFile);
+      expect(control.readOrchestratorControlPlaneState().missionId).toBe(seedId);
+      const row = getSqlite().prepare(
+        'SELECT mission_state_json FROM missions WHERE id = ?',
+      ).get(seedId) as { mission_state_json: string };
+      const packet = JSON.parse(row.mission_state_json).packets[0];
+      expect(packet.queueState).toBe('held');
+      expect(packet.operatorStopped ?? false).toBe(false);
+      expect(packet.blockedReason).toBe('Awaiting explicit dispatch');
+      expect(registry.listMissionRegistryEntries({ includeArchived: true })
+        .map((entry) => entry.id).sort()).toEqual(initialIds);
+    } finally {
+      releaseLock.resolve();
+      await holder;
+      spy.mockRestore();
+      principal.role = 'operator';
+    }
   }, 60_000);
 });
