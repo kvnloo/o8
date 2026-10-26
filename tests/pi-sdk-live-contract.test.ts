@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +10,13 @@ import { createBudgetedPiTestTransport, resolveLivePiTestContract } from '@/lib/
 const SERVER_FIELDS = new Set(['model', 'messages', 'max_tokens', 'stream', 'temperature', 'top_p',
   'tools', 'tool_choice', 'response_format', 'stop', 'stream_options', 'usage']);
 const roots: string[] = [];
+beforeEach(() => {
+  // Offline wire fixtures replay the verified contract, not today's live pricing.
+  // Keep real timers for the stream and never extend the production expiry.
+  vi.spyOn(Date, 'now').mockReturnValue(O8_MANAGED_FLASH_LITE_CONTRACT.expiresAt - 1);
+});
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
@@ -47,6 +53,12 @@ async function runOnce(model = O8_MANAGED_FLASH_LITE_MODEL) {
 }
 
 describe('verified managed Pi live contract', () => {
+  it.each([0, 1])('refuses the contract at expiry plus %i ms', offset => {
+    vi.spyOn(Date, 'now').mockReturnValue(O8_MANAGED_FLASH_LITE_CONTRACT.expiresAt + offset);
+    expect(() => validatePiBillingContract(O8_MANAGED_FLASH_LITE_CONTRACT))
+      .toThrow('Billing contract is expired or outside the bounded test scope');
+  });
+
   it('is the live default and bounds every request at 17,696 micro-USD', async () => {
     const live = await resolveLivePiTestContract();
     expect(live).toEqual(O8_MANAGED_FLASH_LITE_CONTRACT);

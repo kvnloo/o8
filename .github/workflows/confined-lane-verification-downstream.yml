@@ -14,6 +14,10 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -30,6 +34,12 @@ jobs:
         run: npm run test:integration -- tests/lane-verification-confinement-real-path.test.ts
       - name: Test classification
         run: npm run test:classification:check
+      - name: Offline contract expiry regressions
+        run: npx vitest run --config config/vitest/vitest.unit.config.ts tests/pi-sdk-live-contract.test.ts
+      - name: Repair lint and rules
+        run: |
+          npx eslint tests/pi-sdk-live-contract.test.ts
+          npm run rule-check -- --base=a31a4be87701f059f2181c6027d50329ed6a7d55
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Existing hermetic completion
