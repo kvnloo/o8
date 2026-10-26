@@ -331,3 +331,40 @@ export async function persistReleasedPacketToMission(
     return write.immediate();
   });
 }
+
+/**
+ * Acquire registry row locks in sorted order and commit a synchronous group
+ * under one SQLite transaction. In particular, no async authorization gap may
+ * occur between the final guard and the durable registry writes.
+ */
+export async function withAtomicMissionRegistryBatch<T>(
+  missionIds: readonly string[],
+  mutation: (persist: (state: OrchestratorMissionState, mirror?: boolean) => void) => T,
+): Promise<T> {
+  const ids = [...new Set(missionIds.map((id) => id.trim()).filter(Boolean))].sort();
+  const acquire = async (index: number): Promise<T> => {
+    if (index < ids.length) {
+      return withRegistryMutationLock(ids[index]!, () => acquire(index + 1));
+    }
+    const transaction = getSqlite().transaction(() => mutation((state, mirror = false) => {
+      if (!writeMissionRegistryStateUnlocked(state, mirror)) {
+        throw new Error('Mission registry batch persistence failed.');
+      }
+    }));
+    return transaction.immediate();
+  };
+  return acquire(0);
+}
+
+/** Read-only candidate discovery, separated from the guarded commit. */
+export async function prepareMissionRegistrySupersession(
+  threadId: string,
+  successorMissionId: string,
+): Promise<string[]> {
+  const thread = threadId.trim();
+  if (!thread) return [];
+  return listMissionRegistryEntries()
+    .filter((entry) => entry.id !== successorMissionId && !missionIsTerminal(entry.mission)
+      && entry.mission.packets.some((packet) => packet.orchestratorThreadId?.trim() === thread))
+    .map((entry) => entry.id);
+}
