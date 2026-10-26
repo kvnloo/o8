@@ -93,11 +93,12 @@ async function arrange(caseId: string) {
     readBudget: { requiredReads: ['src/feature.ts'], minToolCalls: 1, planBeforeWrite: true },
   };
   const state: OrchestratorMissionState = createEmptyOrchestratorMissionState();
-  state.missionId = 'mission-' + caseId;
+  const missionId = 'mission-' + caseId;
+  state.missionId = missionId;
   state.repoPath = repoPath;
   state.packets = [packet];
   const creationReceipt = {
-    missionId: state.missionId,
+    missionId,
     packets: [{ id: packet.id, title: packet.title, wave: 1 }],
     branchPreparation: [],
     authoredIntentRef: ref,
