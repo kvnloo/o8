@@ -6489,6 +6489,12 @@
       ]
     },
     {
+      "path": "tests/tts-edge-installed.integration.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/typecheck-parity.test.ts",
       "reasons": [
         "child-process"
