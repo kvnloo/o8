@@ -1,4 +1,7 @@
 import { findLaneByPacket } from '@/lib/lane/registry';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 import {
   readMissionRegistryEntry,
   listMissionRegistryEntries,
@@ -106,6 +109,11 @@ export async function persistCreatedMission(input: MissionCreationCommitInput): 
     return withControlPlaneLock(async () => {
       assertAuthorized();
       const before = readOrchestratorControlPlaneState();
+      // Comparing hydrated snapshots is unsafe: normalization stamps the
+      // routing decision with a new timestamp on each read. Compare the
+      // actual persisted bytes while holding the control-plane lock.
+      const stateFile = join(getDataDir(), 'orchestrator-state.json');
+      const beforeBytes = readFileSync(stateFile, 'utf8');
       const candidateIds = await prepareMissionRegistrySupersession(supersedingThreadId, missionId);
       assertAuthorized();
       const lockIds = [...candidateIds, ...(before.missionId ? [before.missionId] : [])];
@@ -116,8 +124,8 @@ export async function persistCreatedMission(input: MissionCreationCommitInput): 
           // Revocation while either awaited lock is pending fails before writes.
           assertAuthorized();
           const current = readOrchestratorControlPlaneState();
-          if (JSON.stringify(current) !== JSON.stringify(before)) {
-            throw new Error('Control-plane mission changed during supersession lock acquisition.');
+          if (readFileSync(stateFile, 'utf8') !== beforeBytes) {
+            throw new Error('Persisted control-plane mission changed during supersession lock acquisition.');
           }
           const active = listMissionRegistryEntries().filter((entry) => (
             entry.id !== missionId
