@@ -1,0 +1,122 @@
+name: Mission supersession authorization proof (downstream)
+
+# Runs only on the isolated fork branch. The first commit executes the exact
+# UNMODIFIED PR 82 head and leaves a genuine RED as a failing check. A later
+# separately committed fix switches to its own exact commit for GREEN gates.
+on:
+  push:
+    branches: [agent/3185-auth-atomic-20261026]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mission-auth-atomic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ORIGINAL_SHA: 3702185a5894d6e716ac7cb213e7064bee08127e
+      FIX_PHASE: ${{ startsWith(github.event.head_commit.message, 'fix(auth):') }}
+    steps:
+      - name: Checkout exact pre-fix baseline or separately committed fix
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.FIX_PHASE == 'true' && github.sha || env.ORIGINAL_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Attest actual source SHA
+        shell: bash
+        run: |
+          mkdir -p .ci-logs
+          expected="${{ env.FIX_PHASE == 'true' && github.sha || env.ORIGINAL_SHA }}"
+          observed="$(git rev-parse HEAD)"
+          printf 'expected=%s\nobserved=%s\nphase=%s\n' "$expected" "$observed" "$FIX_PHASE" | tee .ci-logs/source.txt
+          test "$observed" = "$expected"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install npm 11
+        run: npm install -g npm@11
+      - name: Install exact-tree dependencies
+        run: npm ci --prefer-offline
+      - name: Checkout pinned canonical AODL
+        uses: actions/checkout@v4
+        with:
+          repository: kvnloo/aodl
+          ref: ba9190a6dadcc5ca747c7766b3b53bfc246ce53e
+          path: .test-deps/aodl
+          persist-credentials: false
+      - name: Prove AODL checkout SHA
+        shell: bash
+        run: |
+          observed="$(git -C .test-deps/aodl rev-parse HEAD)"
+          printf '%s\n' "$observed" | tee .ci-logs/aodl-sha.txt
+          test "$observed" = ba9190a6dadcc5ca747c7766b3b53bfc246ce53e
+      - name: Focused real-path test (RED before fix, GREEN after fix)
+        shell: bash
+        run: |
+          set -o pipefail
+          O8_AODL_SOURCE_DIR="$GITHUB_WORKSPACE/.test-deps/aodl" \
+          O8_AODL_PYTHON="$(command -v python3)" \
+          npm run test:integration -- tests/mission-auth-supersession-real-path.test.ts \
+            2>&1 | tee ".ci-logs/${{ env.FIX_PHASE == 'true' && 'after-focused.log' || 'before-focused.log' }}"
+      - name: Adjacent real AODL route / persistence tests
+        if: ${{ !cancelled() && env.FIX_PHASE == 'true' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          O8_AODL_SOURCE_DIR="$GITHUB_WORKSPACE/.test-deps/aodl" \
+          O8_AODL_PYTHON="$(command -v python3)" \
+          npm run test:integration -- tests/aodl-consumer-real-path.test.ts 2>&1 | tee .ci-logs/after-adjacent.log
+      - name: Focused route tests
+        if: ${{ !cancelled() && env.FIX_PHASE == 'true' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx vitest run src/app/api/orchestrator/intent-contract/route.test.ts 2>&1 | tee .ci-logs/after-routes.log
+      - name: Classification
+        if: ${{ !cancelled() && env.FIX_PHASE == 'true' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:classification:check 2>&1 | tee .ci-logs/after-classification.log
+      - name: Full strict TypeScript
+        if: ${{ !cancelled() && env.FIX_PHASE == 'true' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tsc --noEmit 2>&1 | tee .ci-logs/after-tsc.log
+      - name: Touched TypeScript lint
+        if: ${{ !cancelled() && env.FIX_PHASE == 'true' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx eslint tests/mission-auth-supersession-real-path.test.ts \
+            src/lib/orchestrator/operator-mission-service/mission.ts \
+            src/lib/orchestrator/operator-mission-service/mission-supersession.ts \
+            src/lib/orchestrator/mission-registry.ts 2>&1 | tee .ci-logs/after-eslint.log
+      - name: Repository rule check against exact PR 82 head
+        if: ${{ !cancelled() && env.FIX_PHASE == 'true' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run rule-check -- --base=3702185a5894d6e716ac7cb213e7064bee08127e 2>&1 | tee .ci-logs/after-rule-check.log
+      - name: Hermetic full npm test
+        if: ${{ !cancelled() && env.FIX_PHASE == 'true' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee .ci-logs/after-npm-test.log
+      - name: Upload raw before/after evidence even when RED
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mission-auth-${{ github.sha }}
+          path: .ci-logs/
+          if-no-files-found: warn
+          retention-days: 14
