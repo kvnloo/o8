@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -143,6 +144,7 @@ describe('mission supersession during bound operator revocation (real persistenc
     expect(seedResponse.status).toBe(201);
     const seedId = (await seedResponse.json()).result.missionId as string;
     const originalCurrent = structuredClone(readOrchestratorControlPlaneState());
+    const originalStoredFile = readFileSync(join(principal.root, 'orchestrator-state.json'), 'utf8');
     expect(originalCurrent.missionId).toBe(seedId);
     const seedRegistry = registry.readMissionRegistryEntry(seedId, { includeArchived: true });
     expect(seedRegistry?.mission.packets).toHaveLength(1);
@@ -174,6 +176,8 @@ describe('mission supersession during bound operator revocation (real persistenc
       try {
         await registryMutationReturned.promise;
         expect(supersessionCalls).toBe(1);
+        expect(readFileSync(join(principal.root, 'orchestrator-state.json'), 'utf8'))
+          .toBe(originalStoredFile);
         expect(getSqlite().prepare(
       'SELECT mission_state_json, updated_at, archived_at FROM missions WHERE id = ?',
     ).get(seedId)).toEqual(rawSeedRow);
@@ -188,7 +192,9 @@ describe('mission supersession during bound operator revocation (real persistenc
 
       // Response rejection is insufficient: both durable stores must still
       // describe the authorized seed, and no successor may be admitted.
-      expect(readOrchestratorControlPlaneState()).toEqual(originalCurrent);
+      expect(readFileSync(join(principal.root, 'orchestrator-state.json'), 'utf8'))
+        .toBe(originalStoredFile);
+      expect(readOrchestratorControlPlaneState().missionId).toBe(seedId);
       const registryAfter = registry.readMissionRegistryEntry(seedId, { includeArchived: true });
       expect(registryAfter?.mission.packets[0].operatorStopped ?? false).toBe(false);
       expect(getSqlite().prepare(
