@@ -1,7 +1,8 @@
 name: Mission supersession authorization proof (downstream)
 
-# Runs only on the isolated fork branch. The first commit executes the exact
-# UNMODIFIED PR 82 head and leaves a genuine RED as a failing check. A later
+# Runs only on the isolated fork branch. The first commit executed the exact
+# UNMODIFIED PR 82 head (setup RED only). The repaired test-only head is
+# pinned for a second baseline before any source fix. RED remains failing. A later
 # separately committed fix switches to its own exact commit for GREEN gates.
 on:
   push:
@@ -20,19 +21,20 @@ jobs:
     timeout-minutes: 45
     env:
       ORIGINAL_SHA: 3702185a5894d6e716ac7cb213e7064bee08127e
+      TEST_REPAIR_SHA: c51fdbb42a1f6aac9fc7f279d48798abb8636b8f
       FIX_PHASE: ${{ startsWith(github.event.head_commit.message, 'fix(auth):') }}
     steps:
       - name: Checkout exact pre-fix baseline or separately committed fix
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.FIX_PHASE == 'true' && github.sha || env.ORIGINAL_SHA }}
+          ref: ${{ env.FIX_PHASE == 'true' && github.sha || env.TEST_REPAIR_SHA }}
           fetch-depth: 0
           persist-credentials: false
       - name: Attest actual source SHA
         shell: bash
         run: |
           mkdir -p .ci-logs
-          expected="${{ env.FIX_PHASE == 'true' && github.sha || env.ORIGINAL_SHA }}"
+          expected="${{ env.FIX_PHASE == 'true' && github.sha || env.TEST_REPAIR_SHA }}"
           observed="$(git rev-parse HEAD)"
           printf 'expected=%s\nobserved=%s\nphase=%s\n' "$expected" "$observed" "$FIX_PHASE" | tee .ci-logs/source.txt
           test "$observed" = "$expected"
@@ -119,4 +121,5 @@ jobs:
           name: mission-auth-${{ github.sha }}
           path: .ci-logs/
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14
