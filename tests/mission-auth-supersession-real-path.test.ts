@@ -155,16 +155,17 @@ describe('mission supersession during bound operator revocation (real persistenc
 
     const registryMutationReturned = deferred();
     const resumeMissionCreate = deferred();
-    const originalCancel = supersession.cancelSupersededRegistryMissions;
+    const originalPrepare = supersession.prepareSupersededRegistryMissions;
     let supersessionCalls = 0;
-    // Let the REAL SQLite registry cancellation finish, then hold the awaited
-    // production call before its continuation can replace the current mission.
-    const pause = vi.spyOn(supersession, 'cancelSupersededRegistryMissions')
+    // Hold after registry targets are collected but BEFORE the guarded
+    // SQLite/file commit. This must leave both durable stores untouched.
+    const pause = vi.spyOn(supersession, 'prepareSupersededRegistryMissions')
       .mockImplementation(async (input) => {
-        await originalCancel(input);
+        const ids = await originalPrepare(input);
         supersessionCalls += 1;
         registryMutationReturned.resolve();
         await resumeMissionCreate.promise;
+        return ids;
       });
     try {
       const pending = request('auth-race-successor', ref);
@@ -172,7 +173,7 @@ describe('mission supersession during bound operator revocation (real persistenc
         await registryMutationReturned.promise;
         expect(supersessionCalls).toBe(1);
         expect(registry.readMissionRegistryEntry(seedId, { includeArchived: true })
-          ?.mission.packets[0].blockedReason).toBe('superseded_by_newer_mission');
+          ?.mission.packets[0]).toEqual(originalRegistryPacket);
         principal.role = 'worker'; // Revoked while the mission's registry await is pending.
       } finally {
         resumeMissionCreate.resolve();
@@ -196,5 +197,57 @@ describe('mission supersession during bound operator revocation (real persistenc
       pause.mockRestore();
       principal.role = 'operator';
     }
+  }, 60_000);
+
+  it('admits an authorized successor and replays a retry without duplicate SQLite rows', async () => {
+    const { POST: publishIntent } = await import('@/app/api/orchestrator/intent-contract/route');
+    const { POST: createMission } = await import('@/app/api/orchestrator/create-mission/route');
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const registry = await import('@/lib/orchestrator/mission-registry');
+    const doc = JSON.stringify({
+      specVersion: '0.2', graphId: 'mission-auth-success', revision: 0,
+      intentGraph: { nodes: [{ id: 'task', kind: 'task', ports: [], capabilities: ['read', 'execute'] }], edges: [] },
+      policies: { kinds: [] },
+      constraints: { budgets: { tokens: 100 }, termination: { on: 'verified' } },
+      provenance: { sourceHash: '0'.repeat(64) },
+    });
+    const published = await publishIntent(new NextRequest(intentUrl, { method: 'POST', body: doc }));
+    expect(published.status).toBe(200);
+    const ref = (await published.json()).record.ref;
+    const run = (id: string, bound: boolean) => createMission(new NextRequest(missionUrl, {
+      method: 'POST',
+      body: JSON.stringify({
+        repoPath, requestedRuntime: 'codex', huddle: false, dispatchOnCreate: false,
+        orchestratorThreadId: 'auth-supersession-authorized',
+        clientMutationId: id, constraints: 'Authorized mission control.',
+        ...(bound ? { authoredIntentRef: ref } : {}),
+        issues: [{ number: 91_318_503, title: 'authorized packet', body: 'No worker launch.', url: '' }],
+      }),
+    }));
+    principal.role = 'operator';
+    const seed = await run('auth-success-seed', false);
+    expect(seed.status).toBe(201);
+    const seedId = (await seed.json()).result.missionId as string;
+    const successor = await run('auth-success-successor', true);
+    expect(successor.status).toBe(201);
+    const successorId = (await successor.json()).result.missionId as string;
+    expect(successorId).not.toBe(seedId);
+    expect(readOrchestratorControlPlaneState().missionId).toBe(successorId);
+    const cancelled = registry.readMissionRegistryEntry(seedId, { includeArchived: true });
+    expect(cancelled?.mission.packets[0].blockedReason).toBe('superseded_by_newer_mission');
+    expect(cancelled?.mission.packets[0].operatorStopped).toBe(true);
+    const successorRow = registry.readMissionRegistryEntry(successorId, { includeArchived: true });
+    expect(successorRow?.mission.creationReceipt?.authoredIntentRef).toEqual(ref);
+    expect(successorRow?.mission.packets[0].queueState).toBe('held');
+    const beforeRetry = registry.listMissionRegistryEntries({ includeArchived: true })
+      .map((entry) => entry.id).sort();
+    const retry = await run('auth-success-successor', true);
+    expect(retry.status).toBe(201);
+    expect((await retry.json()).result.missionId).toBe(successorId);
+    expect(registry.listMissionRegistryEntries({ includeArchived: true })
+      .map((entry) => entry.id).sort()).toEqual(beforeRetry);
+    expect(registry.readMissionRegistryEntry(seedId, { includeArchived: true })
+      ?.mission.packets[0]).toEqual(cancelled!.mission.packets[0]);
+    expect(readOrchestratorControlPlaneState().missionId).toBe(successorId);
   }, 60_000);
 });
