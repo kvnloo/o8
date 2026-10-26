@@ -2,7 +2,14 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// This is only the npm-script result-contract unit suite. The real confinement
+// side-effect regression runs separately against the installed native helper.
+vi.mock('./confined-verification-exec', async () => {
+  const { materializationAwareExecFile } = await import('@/lib/worktree/materialization-execution');
+  return { confinedVerificationExecFile: materializationAwareExecFile };
+});
 
 import { runLaneRebaseTests } from './rebase-tests';
 

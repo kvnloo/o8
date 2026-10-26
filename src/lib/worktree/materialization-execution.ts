@@ -51,6 +51,15 @@ export function guardedWorkspaceInvocation(
   };
 }
 
+/** Use the same pinned ownership guard for externally confined verifier children.
+ * Never silently discard the AsyncLocalStorage workspace identity. */
+export function materializationGuardedInvocationForCwd(
+  command: string, args: readonly string[], cwd: string,
+): { command: string; args: string[] } {
+  const identity = materializationContext.getStore()?.get(path.resolve(cwd)) ?? null;
+  return guardedWorkspaceInvocation(command, [...args], identity);
+}
+
 export function withWorktreeMaterializationExecution<T>(
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,
