@@ -103,7 +103,6 @@ describe('mission supersession during bound operator revocation (real persistenc
     const { POST: createMission } = await import('@/app/api/orchestrator/create-mission/route');
     const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
     const registry = await import('@/lib/orchestrator/mission-registry');
-    const supersession = await import('@/lib/orchestrator/operator-mission-service/mission-supersession');
 
     const doc = JSON.stringify({
       specVersion: '0.2', graphId: 'mission-auth-race', revision: 0,
@@ -155,13 +154,13 @@ describe('mission supersession during bound operator revocation (real persistenc
 
     const registryMutationReturned = deferred();
     const resumeMissionCreate = deferred();
-    const originalPrepare = supersession.prepareSupersededRegistryMissions;
+    const originalPrepare = registry.prepareMissionRegistrySupersession;
     let supersessionCalls = 0;
     // Hold after registry targets are collected but BEFORE the guarded
     // SQLite/file commit. This must leave both durable stores untouched.
-    const pause = vi.spyOn(supersession, 'prepareSupersededRegistryMissions')
-      .mockImplementation(async (input) => {
-        const ids = await originalPrepare(input);
+    const pause = vi.spyOn(registry, 'prepareMissionRegistrySupersession')
+      .mockImplementation(async (thread, successor) => {
+        const ids = await originalPrepare(thread, successor);
         supersessionCalls += 1;
         registryMutationReturned.resolve();
         await resumeMissionCreate.promise;
