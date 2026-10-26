@@ -1,12 +1,12 @@
 name: Mission supersession authorization proof (downstream)
 
-# Runs only on the isolated fork branch. The first commit executed the exact
-# UNMODIFIED PR 82 head (setup RED only). The repaired test-only head is
-# pinned for a second baseline before any source fix. RED remains failing. A later
-# separately committed fix switches to its own exact commit for GREEN gates.
+# This draft lane runs on PR updates. Earlier immutable runs captured an
+# unchanged-head setup failure and repaired-test persisted-state RED.
+# Candidate checks always inspect the exact PR head (not a merge commit).
 on:
-  push:
-    branches: [agent/3185-auth-atomic-20261026]
+  pull_request:
+    branches: [test/3185-mission-auth-race]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -22,19 +22,19 @@ jobs:
     env:
       ORIGINAL_SHA: 3702185a5894d6e716ac7cb213e7064bee08127e
       TEST_REPAIR_SHA: c51fdbb42a1f6aac9fc7f279d48798abb8636b8f
-      FIX_PHASE: ${{ startsWith(github.event.head_commit.message, 'fix(auth):') }}
+      FIX_PHASE: 'true'
     steps:
-      - name: Checkout exact pre-fix baseline or separately committed fix
+      - name: Checkout exact draft candidate head
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.FIX_PHASE == 'true' && github.sha || env.TEST_REPAIR_SHA }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Attest actual source SHA
         shell: bash
         run: |
           mkdir -p .ci-logs
-          expected="${{ env.FIX_PHASE == 'true' && github.sha || env.TEST_REPAIR_SHA }}"
+          expected="${{ github.event.pull_request.head.sha }}"
           observed="$(git rev-parse HEAD)"
           printf 'expected=%s\nobserved=%s\nphase=%s\n' "$expected" "$observed" "$FIX_PHASE" | tee .ci-logs/source.txt
           test "$observed" = "$expected"
@@ -118,7 +118,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mission-auth-${{ github.sha }}
+          name: mission-auth-${{ github.event.pull_request.head.sha }}
           path: .ci-logs/
           if-no-files-found: warn
           include-hidden-files: true

@@ -14,6 +14,8 @@ import {
   withLockedState,
   writeOrchestratorControlPlaneState,
 } from '@/lib/orchestrator/control-plane';
+import { archiveMissionsExcept, recordMission } from '@/lib/db/missions-store';
+import { buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { recordOutgoingMissionSnapshot } from './mission-handoff';
 import {
   listActiveMissionRegistryEntries,
@@ -142,6 +144,21 @@ export async function persistCreatedMission(input: MissionCreationCommitInput): 
           assertAuthorized();
           const written = writeOrchestratorControlPlaneState(reconcileOrchestratorControlPlaneState(mission));
           replacedFile = true;
+          const waves = buildDependencyGraph(written.packets).map((node) => node.wave);
+          recordMission({
+            id: missionId,
+            repoPath: written.repoPath ?? '',
+            runtime: written.runtime ?? 'codex',
+            prompt: written.prompt,
+            summary: written.summary,
+            constraints: written.constraints ?? '',
+            packetMeta: written.packets.map((packet) => ({
+              id: packet.id, title: packet.title, referenceLabel: packet.referenceLabel,
+            })),
+            missionState: written,
+            totalWaves: Math.max(1, ...waves),
+          });
+          archiveMissionsExcept(missionId);
           return written;
         });
       } catch (error) {

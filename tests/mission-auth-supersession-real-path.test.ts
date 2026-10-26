@@ -148,7 +148,10 @@ describe('mission supersession during bound operator revocation (real persistenc
     expect(seedRegistry?.mission.packets).toHaveLength(1);
     expect(seedRegistry?.mission.packets[0].queueState).toBe('held');
     expect(seedRegistry?.mission.packets[0].blockedReason).toBe('Awaiting explicit dispatch');
-    const originalRegistryPacket = structuredClone(seedRegistry!.mission.packets[0]);
+    const { getSqlite } = await import('@/lib/db');
+    const rawSeedRow = getSqlite().prepare(
+      'SELECT mission_state_json, updated_at, archived_at FROM missions WHERE id = ?',
+    ).get(seedId);
     const beforeIds = registry.listMissionRegistryEntries({ includeArchived: true })
       .map((entry) => entry.id).sort();
 
@@ -171,8 +174,9 @@ describe('mission supersession during bound operator revocation (real persistenc
       try {
         await registryMutationReturned.promise;
         expect(supersessionCalls).toBe(1);
-        expect(registry.readMissionRegistryEntry(seedId, { includeArchived: true })
-          ?.mission.packets[0]).toEqual(originalRegistryPacket);
+        expect(getSqlite().prepare(
+      'SELECT mission_state_json, updated_at, archived_at FROM missions WHERE id = ?',
+    ).get(seedId)).toEqual(rawSeedRow);
         principal.role = 'worker'; // Revoked while the mission's registry await is pending.
       } finally {
         resumeMissionCreate.resolve();
@@ -187,7 +191,9 @@ describe('mission supersession during bound operator revocation (real persistenc
       expect(readOrchestratorControlPlaneState()).toEqual(originalCurrent);
       const registryAfter = registry.readMissionRegistryEntry(seedId, { includeArchived: true });
       expect(registryAfter?.mission.packets[0].operatorStopped ?? false).toBe(false);
-      expect(registryAfter?.mission.packets[0]).toEqual(originalRegistryPacket);
+      expect(getSqlite().prepare(
+      'SELECT mission_state_json, updated_at, archived_at FROM missions WHERE id = ?',
+    ).get(seedId)).toEqual(rawSeedRow);
       expect(registryAfter?.mission.packets[0].queueState).toBe('held');
       expect(registry.listMissionRegistryEntries({ includeArchived: true })
         .map((entry) => entry.id).sort()).toEqual(beforeIds);
@@ -232,11 +238,16 @@ describe('mission supersession during bound operator revocation (real persistenc
     const successorId = (await successor.json()).result.missionId as string;
     expect(successorId).not.toBe(seedId);
     expect(readOrchestratorControlPlaneState().missionId).toBe(successorId);
+    const { getSqlite } = await import('@/lib/db');
     const cancelled = registry.readMissionRegistryEntry(seedId, { includeArchived: true });
+    const cancelledRawRow = getSqlite().prepare(
+      'SELECT mission_state_json, updated_at, archived_at FROM missions WHERE id = ?',
+    ).get(seedId);
     expect(cancelled?.mission.packets[0].blockedReason).toBe('superseded_by_newer_mission');
     expect(cancelled?.mission.packets[0].operatorStopped).toBe(true);
     const successorRow = registry.readMissionRegistryEntry(successorId, { includeArchived: true });
-    expect(successorRow?.mission.creationReceipt?.authoredIntentRef).toEqual(ref);
+    expect((successorRow?.mission.creationReceipt as { authoredIntentRef?: unknown } | null | undefined)
+      ?.authoredIntentRef).toEqual(ref);
     expect(successorRow?.mission.packets[0].queueState).toBe('held');
     const beforeRetry = registry.listMissionRegistryEntries({ includeArchived: true })
       .map((entry) => entry.id).sort();
@@ -245,8 +256,9 @@ describe('mission supersession during bound operator revocation (real persistenc
     expect((await retry.json()).result.missionId).toBe(successorId);
     expect(registry.listMissionRegistryEntries({ includeArchived: true })
       .map((entry) => entry.id).sort()).toEqual(beforeRetry);
-    expect(registry.readMissionRegistryEntry(seedId, { includeArchived: true })
-      ?.mission.packets[0]).toEqual(cancelled!.mission.packets[0]);
+    expect(getSqlite().prepare(
+      'SELECT mission_state_json, updated_at, archived_at FROM missions WHERE id = ?',
+    ).get(seedId)).toEqual(cancelledRawRow);
     expect(readOrchestratorControlPlaneState().missionId).toBe(successorId);
   }, 60_000);
 });
