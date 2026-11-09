@@ -17,7 +17,7 @@ export function isUnreadableCwdName(name: string, fileType: string): boolean {
 /** /proc metadata needed to attest a denied-cwd process, behind a test seam. */
 export interface ProcExemptProbe {
   /** `/proc/<pid>/status` real uid, comm name and PPid, or null when unreadable. */
-  status(pid: number): { uid: number; name?: string; ppid?: number } | null;
+  status(pid: number): { uid: number; name?: string; ppid?: number; nestedPidNamespace?: boolean } | null;
   /** Owner uid of the `/proc/<pid>/cwd` magic link (lstat works under readlink denial). */
   cwdLinkUid(pid: number): number | null;
 }
@@ -35,7 +35,9 @@ const realProcProbe: ProcExemptProbe = {
       const nameField = /^Name:[ \t]+(.+?)[ \t]*$/m.exec(status);
       const ppidField = /^PPid:[ \t]+(\d+)[ \t]*$/m.exec(status);
       const ppid = ppidField && Number.isSafeInteger(Number(ppidField[1])) ? Number(ppidField[1]) : undefined;
-      return { uid, ...(nameField ? { name: nameField[1]! } : {}), ...(ppid === undefined ? {} : { ppid }) };
+      const nspid = /^NSpid:[ \t]+(.+?)[ \t]*$/m.exec(status)?.[1]?.split(/\s+/) ?? [];
+      return { uid, ...(nameField ? { name: nameField[1]! } : {}), ...(ppid === undefined ? {} : { ppid }),
+        ...(nspid.length > 1 ? { nestedPidNamespace: true } : {}) };
     } catch {
       return null;
     }
@@ -76,6 +78,14 @@ function sameUidCwdHolderExempt(pid: number, uid: number, probe: ProcExemptProbe
   // exempt systemd parent for sd-pam, keeps a worker that merely names itself
   // `systemd` from slipping through.
   if (status.name === 'systemd' && status.ppid === 1) return true;
+  // Container process by LINEAGE: a nested PID namespace directly under a
+  // root-owned containerd shim (k3s/Docker pods whose image runs as uid 1000).
+  // o8 never launches workers through containerd. A worker that itself runs
+  // `docker run -v <worktree>` as this uid would be missed here.
+  if (status.nestedPidNamespace && status.ppid !== undefined) {
+    const parent = probe.status(status.ppid);
+    if (parent && parent.uid === 0 && parent.name?.startsWith('containerd-shim')) return true;
+  }
   if (status.name === '(sd-pam)' && status.ppid !== undefined) {
     const parent = probe.status(status.ppid);
     if (parent && parent.uid === uid && parent.name === 'systemd' && parent.ppid === 1) return true;

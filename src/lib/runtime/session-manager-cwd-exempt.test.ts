@@ -77,3 +77,30 @@ describe('unreadableCwdReason session-manager exemption (#5423)', () => {
     expect(unreadableCwdReason([deniedRow(1293), deniedRow(5000)], runnerProbe)).toMatch(/pid 5000/);
   });
 });
+
+// A k3s/Docker pod whose image runs as our uid (metrics-server runs as 1000)
+// has a denied cwd too. It sits in a nested PID namespace under a root-owned
+// containerd shim, so it is exempt; the same shape under a same-uid parent is not.
+const containerProbe: ProcExemptProbe = {
+  status(pid) {
+    if (pid === 13196) return { uid, name: 'metrics-server', ppid: 12855, nestedPidNamespace: true };
+    if (pid === 12855) return { uid: 0, name: 'containerd-shim', ppid: 1 };
+    if (pid === 13300) return { uid, name: 'node', ppid: 13299, nestedPidNamespace: true };
+    if (pid === 13299) return { uid, name: 'containerd-shim', ppid: 1 };
+    if (pid === 13400) return { uid, name: 'node', ppid: 12855 };
+    return null;
+  },
+  cwdLinkUid() { return uid; },
+};
+
+describe('unreadableCwdReason container exemption', () => {
+  it.runIf(onLinux)('exempts a nested-PID-namespace process under a root containerd shim', () => {
+    expect(unreadableCwdReason([deniedRow(13196)], containerProbe)).toBeNull();
+  });
+  it('refuses when the shim parent is not root-owned', () => {
+    expect(unreadableCwdReason([deniedRow(13300)], containerProbe)).toMatch(/pid 13300/);
+  });
+  it('refuses a host-namespace child of a containerd shim', () => {
+    expect(unreadableCwdReason([deniedRow(13400)], containerProbe)).toMatch(/pid 13400/);
+  });
+});
