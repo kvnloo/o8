@@ -1,7 +1,7 @@
 import { userInfo } from 'node:os';
 import { describe, expect, it } from 'vitest';
 
-import { unreadableCwdReason, type ProcExemptProbe } from './process-open-files-snapshot';
+import { benignLsofStderr, unreadableCwdReason, type ProcExemptProbe } from './process-open-files-snapshot';
 
 // #5423: #5403's denied-cwd refusal fires on the runner's own `systemd --user`
 // and its `(sd-pam)` child, whose cwd readlink is blocked by ptrace_scope=1
@@ -111,5 +111,18 @@ describe('unreadableCwdReason container exemption', () => {
   });
   it('refuses a host-namespace child of a containerd shim', () => {
     expect(unreadableCwdReason([deniedRow(13400)], containerProbe)).toMatch(/pid 13400/);
+  });
+});
+
+describe('benignLsofStderr', () => {
+  const overlay = "lsof: WARNING: can't stat() overlay file system /var/lib/docker/overlay2/abc/merged\n      Output information may be incomplete.\n";
+  it('accepts empty stderr and unstat-able mount warnings', () => {
+    expect(benignLsofStderr('')).toBe(true);
+    expect(benignLsofStderr(overlay + overlay)).toBe(true);
+  });
+  it('refuses any other stderr', () => {
+    expect(benignLsofStderr(overlay + 'lsof: no pwd entry for UID 1000\n')).toBe(false);
+    expect(benignLsofStderr('lsof: WARNING: can\'t stat() overlay file system /a b\n')).toBe(false);
+    expect(benignLsofStderr('Output information may be incomplete.')).toBe(false);
   });
 });

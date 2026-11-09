@@ -1,5 +1,5 @@
 import { readCloseProcessTable } from '@/lib/runtime/close-process-table';
-import { parseOpenFileSnapshot, readCloseOpenFiles, readCloseOpenFileRows } from '@/lib/runtime/process-open-files-snapshot';
+import { parseOpenFileSnapshot, readCloseOpenFiles, readCloseOpenFileRows, benignLsofStderr } from '@/lib/runtime/process-open-files-snapshot';
 import { refreshCloseProcessObservation, hasCloseProcessObservation } from '@/lib/runtime/close-process-observation';
 import { closeObservedHelperSettled, observeCloseProcess } from '@/lib/runtime/close-process-observation';
 import { execFile } from '@/lib/providers/child-process';
@@ -28,7 +28,9 @@ async function nativeCommand(file: string, args: string[], absentExit: boolean) 
     const result = await execFileAsync(file, args, {
       encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
     });
-    if (result.stderr.trim()) throw new OrphanCloseRefusal(`${file} probe returned incomplete output`);
+    if (file === 'lsof' ? !benignLsofStderr(result.stderr) : result.stderr.trim()) {
+      throw new OrphanCloseRefusal(`${file} probe returned incomplete output`);
+    }
     return result.stdout;
   } catch (error) {
     if (error instanceof OrphanCloseRefusal) throw error;

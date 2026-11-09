@@ -176,13 +176,24 @@ export function parseOpenFileSnapshot(files: string): OpenFileRow[] {
   return entries;
 }
 
+/**
+ * lsof warns when it cannot stat() a mount point it may not enter (rootful
+ * Docker overlay rootfs). That only drops device numbers for that mount; every
+ * process and its open-file names are still listed. Any other stderr refuses.
+ */
+export function benignLsofStderr(stderr: string): boolean {
+  return stderr.split('\n').every(line => !line.trim()
+    || /^lsof: WARNING: can't stat\(\) [\w.-]+ file system \S+$/.test(line)
+    || /^\s+Output information may be incomplete\.$/.test(line));
+}
+
 export function readCloseOpenFiles(): Promise<string> {
   return observeCloseProcess('open-files', async () => {
     try {
       const { stdout, stderr } = await run('lsof', ['-nP', '-FpcLftn'], {
         encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
       });
-      if (stderr.trim() || !stdout.trim()) throw new Error('Native open-file snapshot is incomplete.');
+      if (!benignLsofStderr(stderr) || !stdout.trim()) throw new Error('Native open-file snapshot is incomplete.');
       return stdout;
     } catch (error) {
       if (!missingLinuxLsof(error)) throw error;
