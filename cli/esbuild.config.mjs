@@ -58,6 +58,8 @@ await esbuild.build({
   define: { __O8_CLI_VERSION__: JSON.stringify(cliVersion) },
   plugins: [sqlitePlugin],
   alias: cliBundleAlias,
+  // playwright-core 1.60 requires optional chromium-bidi at load; resolve it from node_modules at runtime (as #5734 does for server bundles).
+  external: ['playwright-core'],
   outfile: outFile,
 });
 
