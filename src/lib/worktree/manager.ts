@@ -1566,6 +1566,11 @@ export class WorktreeManager {
           cwd: worktreePath,
           timeout: 120_000,
         }).catch((error) => {
+          // PEP 668 distros (Arch, Debian 12+, Fedora) refuse system-wide pip.
+          // That is the interpreter's policy, not a broken worktree: the worker
+          // chooses its own environment, so the packet still launches.
+          const stderr = String((error as { stderr?: unknown })?.stderr ?? '');
+          if (stderr.includes('externally-managed-environment')) return;
           if (launch?.packetId && launch.laneId) throw error;
           // Interactive workspaces can still proceed without optional tooling.
         });
