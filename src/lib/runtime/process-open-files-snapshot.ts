@@ -86,6 +86,13 @@ function sameUidCwdHolderExempt(pid: number, uid: number, probe: ProcExemptProbe
     const parent = probe.status(status.ppid);
     if (parent && parent.uid === 0 && parent.name?.startsWith('containerd-shim')) return true;
   }
+  // OpenSSH privilege separation: the same-uid `sshd-session` child of a root
+  // `sshd-session` is non-dumpable and stays in the login's home; the user's
+  // shell (its child) is readable and is checked normally.
+  if (status.name === 'sshd-session' && status.ppid !== undefined) {
+    const parent = probe.status(status.ppid);
+    if (parent && parent.uid === 0 && parent.name === 'sshd-session') return true;
+  }
   if (status.name === '(sd-pam)' && status.ppid !== undefined) {
     const parent = probe.status(status.ppid);
     if (parent && parent.uid === uid && parent.name === 'systemd' && parent.ppid === 1) return true;

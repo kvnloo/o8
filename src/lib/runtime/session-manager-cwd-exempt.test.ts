@@ -88,6 +88,9 @@ const containerProbe: ProcExemptProbe = {
     if (pid === 13300) return { uid, name: 'node', ppid: 13299, nestedPidNamespace: true };
     if (pid === 13299) return { uid, name: 'containerd-shim', ppid: 1 };
     if (pid === 13400) return { uid, name: 'node', ppid: 12855 };
+    if (pid === 22979) return { uid, name: 'sshd-session', ppid: 22970 };
+    if (pid === 22970) return { uid: 0, name: 'sshd-session', ppid: 1060 };
+    if (pid === 23000) return { uid, name: 'sshd-session', ppid: 4000 };
     return null;
   },
   cwdLinkUid() { return uid; },
@@ -99,6 +102,12 @@ describe('unreadableCwdReason container exemption', () => {
   });
   it('refuses when the shim parent is not root-owned', () => {
     expect(unreadableCwdReason([deniedRow(13300)], containerProbe)).toMatch(/pid 13300/);
+  });
+  it.runIf(onLinux)('exempts the same-uid sshd-session child of a root sshd-session', () => {
+    expect(unreadableCwdReason([deniedRow(22979)], containerProbe)).toBeNull();
+  });
+  it('refuses an sshd-session-named process without a root sshd-session parent', () => {
+    expect(unreadableCwdReason([deniedRow(23000)], containerProbe)).toMatch(/pid 23000/);
   });
   it('refuses a host-namespace child of a containerd shim', () => {
     expect(unreadableCwdReason([deniedRow(13400)], containerProbe)).toMatch(/pid 13400/);
