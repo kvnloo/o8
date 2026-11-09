@@ -231,7 +231,26 @@ function readPort(path: string): number | null {
   }
 }
 
+// A Linux reboot ends every process from the prior boot, so state whose every
+// claim names another boot id carries no live ownership to reconcile.
+function retainedFromPriorBoot(state: ServeState): boolean {
+  if (process.platform !== 'linux') return false;
+  let bootId: string;
+  try { bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(); } catch { return false; }
+  const claims = [state.processIdentity, state.supervisorIdentity, ...state.children.map((child) => child.identity),
+    ...(state.shutdownProcesses ?? []).map((claim) => claim.identity)];
+  return Boolean(state.processIdentity) && claims.every((claim) => claim === undefined || (claim.bootId && claim.bootId !== bootId))
+    && claims.some((claim) => claim?.bootId);
+}
+
 async function assertDataDirAvailableForServe(paths: ServePaths): Promise<void> {
+  const prior = readState(paths);
+  if (prior && retainedFromPriorBoot(prior)) {
+    withServeStateMutation(paths.stateFile, () => {
+      rmSync(paths.stateFile, { force: true });
+      rmSync(paths.pidFile, { force: true });
+    });
+  }
   const retained = readState(paths);
   if (retained?.shutdownProcesses?.length || (retained?.processIdentity && !processAlive(retained.pid))) {
     throw new CliError('serve_stop_unconfirmed', 'Prior shutdown requires ownership reconciliation before restart.', EXIT.CONFLICT);
