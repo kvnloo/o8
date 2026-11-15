@@ -1,0 +1,19 @@
+[package]
+name = "canvas-spike"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# Spike: native infinite moodboard canvas on the GPUI that o8-next already vendors.
+[dependencies]
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "wayland", "x11"] }
+
+[workspace]
+
+[patch.crates-io]
+gpui = { path = "../o8-next/vendor/gpui" }
+taffy = { path = "../o8-next/vendor/taffy" }
+
+[profile.dev.package."*"]
+opt-level = 2
